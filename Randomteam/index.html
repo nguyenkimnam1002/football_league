@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚽ Football Team Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚽ Football Team Manager</h1>
+            <p>Chọn cầu thủ và chia đội tự động</p>
+        </div>
+
+        <div class="content">
+            <div id="statusBar" class="status-bar">
+                📊 Đã chọn: 0 người - Cần ≥14 để chia đội 7v7
+            </div>
+
+            <div class="controls">
+                <button class="btn btn-select" onclick="selectAll()">✅ Chọn Tất Cả</button>
+                <button class="btn btn-clear" onclick="clearAll()">❌ Bỏ Chọn Tất Cả</button>
+                <button class="btn btn-vote" onclick="selectTopRated()">🔥 Chọn Theo Trình Độ</button>
+            </div>
+
+            <div id="playerGrid" class="player-grid">
+                <!-- Players will be loaded here -->
+            </div>
+
+            <div class="controls">
+                <button id="divideBtn" class="btn btn-divide" onclick="divideTeams()" disabled>
+                    ⚽ Chia Đội Ngay
+                </button>
+                <button id="previewBtn" class="btn btn-preview" onclick="previewTeams()" disabled>
+                    👀 Xem Trước Đội Hình
+                </button>
+                <button class="btn btn-clear" onclick="resetAll()">🔄 Reset</button>
+            </div>
+
+            <div id="teamsResult"></div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
