@@ -71,20 +71,22 @@ function getCurrentDateTime() {
 }
 
 function isRegistrationLocked($date = null) {
-    // Nếu đang ở test mode, luôn return false (không bao giờ khóa)
-    if (defined('TEST_MODE') && TEST_MODE) {
-        return false;
-    }
+    // Luôn cho phép đăng ký - không bao giờ khóa
+    return false;
     
-    if ($date === null) {
-        $date = getCurrentDate();
-    }
-    
-    $currentTime = getCurrentTime();
-    $lockTime = LOCK_TIME;
-    
-    // Nếu hiện tại đã qua 22:30 thì khóa đăng ký cho ngày hôm nay
-    return $currentTime >= $lockTime;
+    // Code cũ bị comment để tham khảo:
+    // if (defined('TEST_MODE') && TEST_MODE) {
+    //     return false;
+    // }
+    // 
+    // if ($date === null) {
+    //     $date = getCurrentDate();
+    // }
+    // 
+    // $currentTime = getCurrentTime();
+    // $lockTime = LOCK_TIME;
+    // 
+    // return $currentTime >= $lockTime;
 }
 
 function canUpdateMatchResult($matchDate) {

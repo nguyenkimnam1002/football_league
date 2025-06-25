@@ -60,6 +60,10 @@ try {
             updateMatchResult($input);
             break;
             
+        case 'update_formation':
+            updateFormation($input);
+            break;
+            
         default:
             ob_clean();
             http_response_code(400);
@@ -73,6 +77,114 @@ try {
     exit;
 }
 
+function updateFormation($input) {
+    global $pdo;
+    
+    $matchId = $input['match_id'] ?? null;
+    $teamAPlayers = $input['team_a_players'] ?? [];
+    $teamBPlayers = $input['team_b_players'] ?? [];
+    
+    if (!$matchId || empty($teamAPlayers) || empty($teamBPlayers)) {
+        throw new Exception('Match ID và danh sách cầu thủ là bắt buộc');
+    }
+    
+    // Get match info
+    $stmt = $pdo->prepare("SELECT * FROM daily_matches WHERE id = ?");
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    
+    if (!$match) {
+        throw new Exception('Trận đấu không tồn tại');
+    }
+    
+    if (!canUpdateMatchResult($match['match_date'])) {
+        throw new Exception('Chỉ có thể cập nhật đội hình sau 7h sáng ngày hôm sau');
+    }
+    
+    if ($match['status'] === 'completed') {
+        throw new Exception('Không thể thay đổi đội hình của trận đấu đã hoàn thành');
+    }
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Update team assignments for all players
+        $updateTeamStmt = $pdo->prepare("UPDATE match_participants SET team = ? WHERE match_id = ? AND player_id = ?");
+        
+        // Update team A players
+        foreach ($teamAPlayers as $playerId) {
+            $updateTeamStmt->execute(['A', $matchId, $playerId]);
+        }
+        
+        // Update team B players
+        foreach ($teamBPlayers as $playerId) {
+            $updateTeamStmt->execute(['B', $matchId, $playerId]);
+        }
+        
+        // Regenerate team formations JSON for daily_matches table
+        $teamAFormation = [];
+        $teamBFormation = [];
+        $positions = ['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'];
+        
+        foreach ($positions as $pos) {
+            $teamAFormation[$pos] = [];
+            $teamBFormation[$pos] = [];
+        }
+        
+        // Get updated participants data
+        $stmt = $pdo->prepare("
+            SELECT mp.*, p.name, p.main_position, p.secondary_position, p.main_skill, p.secondary_skill
+            FROM match_participants mp 
+            JOIN players p ON mp.player_id = p.id 
+            WHERE mp.match_id = ?
+        ");
+        $stmt->execute([$matchId]);
+        $participants = $stmt->fetchAll();
+        
+        foreach ($participants as $participant) {
+            $playerData = [
+                'id' => $participant['player_id'],
+                'name' => $participant['name'],
+                'main_position' => $participant['main_position'],
+                'secondary_position' => $participant['secondary_position'],
+                'main_skill' => $participant['main_skill'],
+                'secondary_skill' => $participant['secondary_skill'],
+                'assigned_position' => $participant['assigned_position'],
+                'position_type' => $participant['position_type'],
+                'skill_level' => $participant['skill_level']
+            ];
+            
+            if ($participant['team'] === 'A') {
+                $teamAFormation[$participant['assigned_position']][] = $playerData;
+            } else {
+                $teamBFormation[$participant['assigned_position']][] = $playerData;
+            }
+        }
+        
+        // Update formations in daily_matches
+        $stmt = $pdo->prepare("
+            UPDATE daily_matches 
+            SET team_a_formation = ?, team_b_formation = ?
+            WHERE id = ?
+        ");
+        $stmt->execute([
+            json_encode($teamAFormation, JSON_UNESCAPED_UNICODE),
+            json_encode($teamBFormation, JSON_UNESCAPED_UNICODE),
+            $matchId
+        ]);
+        
+        $pdo->commit();
+        
+        ob_clean();
+        echo json_encode(['success' => 'Cập nhật đội hình thành công'], JSON_UNESCAPED_UNICODE);
+        exit;
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw new Exception('Lỗi khi cập nhật đội hình: ' . $e->getMessage());
+    }
+}
+
 function registerPlayer($input) {
     global $pdo;
     
@@ -83,9 +195,10 @@ function registerPlayer($input) {
         throw new Exception('Player ID is required');
     }
     
-    if (isRegistrationLocked()) {
-        throw new Exception('Đăng ký đã được khóa (sau 22h30)');
-    }
+    // Bỏ check khóa đăng ký - luôn cho phép đăng ký
+    // if (isRegistrationLocked()) {
+    //     throw new Exception('Đăng ký đã được khóa (sau 22h30)');
+    // }
     
     // Check if player exists
     $stmt = $pdo->prepare("SELECT * FROM players WHERE id = ?");
@@ -129,9 +242,10 @@ function unregisterPlayer($input) {
         throw new Exception('Player ID is required');
     }
     
-    if (isRegistrationLocked()) {
-        throw new Exception('Đăng ký đã được khóa (sau 22h30)');
-    }
+    // Bỏ check khóa đăng ký - luôn cho phép hủy đăng ký
+    // if (isRegistrationLocked()) {
+    //     throw new Exception('Đăng ký đã được khóa (sau 22h30)');
+    // }
     
     $stmt = $pdo->prepare("
         DELETE FROM daily_registrations 
@@ -174,16 +288,16 @@ function divideTeams($input) {
         try {
             $matchId = $teamDivision->saveMatchFormation($date, $result['teamA'], $result['teamB']);
             
-            // Lock registration and set match status
+            // Không khóa đăng ký nữa - chỉ set status thành 'scheduled'
             $stmt = $pdo->prepare("
                 UPDATE daily_matches 
-                SET status = 'locked', locked_at = NOW() 
+                SET status = 'scheduled'
                 WHERE id = ?
             ");
             $stmt->execute([$matchId]);
             
             ob_clean();
-            echo json_encode(['success' => 'Đội hình đã được lưu và khóa', 'data' => $result], JSON_UNESCAPED_UNICODE);
+            echo json_encode(['success' => 'Đội hình đã được lưu', 'data' => $result], JSON_UNESCAPED_UNICODE);
             exit;
         } catch (Exception $e) {
             throw new Exception('Lỗi khi lưu đội hình: ' . $e->getMessage());

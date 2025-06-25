@@ -63,6 +63,7 @@ $allPlayers = $stmt->fetchAll();
             border-radius: 10px;
             transition: all 0.3s;
             cursor: pointer;
+            min-height: 100px;
         }
         .player-card:hover {
             border-color: #28a745;
@@ -88,6 +89,8 @@ $allPlayers = $stmt->fetchAll();
             background: #f8f9fa;
             border-radius: 15px;
             padding: 20px;
+            max-height: 600px;
+            overflow-y: auto;
         }
         .team-a { border-left: 4px solid #dc3545; }
         .team-b { border-left: 4px solid #007bff; }
@@ -116,15 +119,11 @@ $allPlayers = $stmt->fetchAll();
             transform: translateX(5px);
             box-shadow: 0 4px 15px rgba(0,0,0,0.2);
         }
-        @media (max-width: 768px) {
-            .btn-group .btn {
-                font-size: 0.85rem;
-                padding: 0.5rem;
-            }
-        }
         .player-select-card {
             transition: all 0.3s ease;
             cursor: pointer;
+            min-height: 80px;
+            position: relative;
         }
         .player-select-card:hover {
             background-color: #f8f9fa;
@@ -140,10 +139,77 @@ $allPlayers = $stmt->fetchAll();
         }
         .form-check-label {
             cursor: pointer;
+            width: 100%;
         }
         #selectedCount {
             font-weight: bold;
             color: #fff;
+        }
+        .players-grid {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 15px;
+            background: white;
+        }
+        .position-group {
+            margin-bottom: 20px;
+        }
+        .position-title {
+            background: #f8f9fa;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            color: #495057;
+            border-left: 4px solid #28a745;
+            margin-bottom: 10px;
+        }
+        .registered-players {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .player-compact {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 8px 12px;
+            margin-bottom: 6px;
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+        .player-compact:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-color: #28a745;
+        }
+        .formation-display {
+            max-height: 700px;
+            overflow-y: auto;
+        }
+        .position-players {
+            min-height: 50px;
+            border: 1px dashed #dee2e6;
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 10px;
+        }
+        .position-players:not(:empty) {
+            border-color: #28a745;
+            background-color: #f8fff9;
+        }
+        @media (max-width: 768px) {
+            .players-grid {
+                max-height: 300px;
+            }
+            .btn-group .btn {
+                font-size: 0.85rem;
+                padding: 0.5rem;
+            }
+            .player-select-card {
+                min-height: 70px;
+            }
         }
     </style>
 </head>
@@ -196,7 +262,7 @@ $allPlayers = $stmt->fetchAll();
         </div>
     </nav>
 
-    <div class="container py-4">
+    <div class="container-fluid py-4">
         <!-- Header -->
         <div class="card card-custom mb-4">
             <div class="card-body text-center">
@@ -204,171 +270,163 @@ $allPlayers = $stmt->fetchAll();
                 <p class="lead">Đăng ký và chia đội tự động hàng ngày</p>
                 
                 <!-- Status Bar -->
-                <div class="alert <?= $isLocked ? 'status-locked' : 'status-open' ?> text-white">
+                <div class="alert status-open text-white">
                     <i class="fas fa-clock me-2"></i>
                     <strong>Ngày <?= date('d/m/Y', strtotime($currentDate)) ?></strong> - 
-                    <?php if ($isLocked): ?>
-                        🔒 Đã khóa đăng ký (sau 22h30)
-                    <?php else: ?>
-                        ✅ Đang mở đăng ký (khóa lúc 22h30)
-                    <?php endif; ?>
-                    - Đã đăng ký: <strong><?= count($registeredPlayers) ?></strong> người
+                    ✅ Luôn mở đăng ký (không giới hạn thời gian)
+                    - Đã đăng ký: <strong id="registeredCount"><?= count($registeredPlayers) ?></strong> người
                 </div>
             </div>
         </div>
 
         <div class="row">
-            <!-- Left Column: Registration -->
-            <div class="col-lg-8">
+            <!-- Left Column: Player Selection & Registered Players -->
+            <div class="col-lg-4">
+                <!-- Player Selection -->
                 <div class="card card-custom mb-4">
                     <div class="card-header">
                         <h5 class="mb-0">
                             <i class="fas fa-user-plus me-2"></i>
-                            Đăng ký tham gia (<?= count($registeredPlayers) ?>/32)
+                            Chọn cầu thủ tham gia
                         </h5>
                     </div>
                     <div class="card-body">
-                        <?php if (!$isLocked): ?>
-                            <!-- Mass Registration -->
-                            <div class="mb-4">
-                                <div class="d-flex justify-content-between align-items-center mb-3">
-                                    <h6 class="mb-0">Chọn cầu thủ tham gia:</h6>
-                                    <div>
-                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAll()">
-                                            <i class="fas fa-check-square"></i> Chọn tất cả
-                                        </button>
-                                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="unselectAll()">
-                                            <i class="fas fa-square"></i> Bỏ chọn tất cả
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <!-- Players Grid -->
-                                <div class="row" id="playersGrid">
-                                    <?php
-                                    // Group unregistered players by position for display
-                                    $unregisteredPlayers = [];
-                                    foreach ($allPlayers as $player) {
-                                        $isRegistered = array_filter($registeredPlayers, function($rp) use ($player) {
-                                            return $rp['id'] == $player['id'];
-                                        });
-                                        if (!$isRegistered) {
-                                            $unregisteredPlayers[$player['main_position']][] = $player;
-                                        }
-                                    }
-                                    ?>
-
-                                    <?php foreach (['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'] as $position): ?>
-                                        <?php if (isset($unregisteredPlayers[$position])): ?>
-                                            <div class="col-12 mb-3">
-                                                <h6 class="text-primary border-bottom pb-2">
-                                                    <?= formatPosition($position) ?> (<?= count($unregisteredPlayers[$position]) ?> người)
-                                                </h6>
-                                                <div class="row">
-                                                    <?php foreach ($unregisteredPlayers[$position] as $player): ?>
-                                                        <div class="col-md-6 col-lg-4 mb-2">
-                                                            <div class="form-check">
-                                                                <input class="form-check-input player-checkbox" 
-                                                                       type="checkbox" 
-                                                                       value="<?= $player['id'] ?>" 
-                                                                       id="player_<?= $player['id'] ?>">
-                                                                <label class="form-check-label w-100" for="player_<?= $player['id'] ?>">
-                                                                    <div class="player-select-card p-2 border rounded">
-                                                                        <div class="fw-bold"><?= htmlspecialchars($player['name']) ?></div>
-                                                                        <div class="small text-muted">
-                                                                            <?= $player['secondary_position'] ? formatPosition($player['secondary_position']) : 'Không có vị trí phụ' ?>
-                                                                        </div>
-                                                                        <div class="mt-1">
-                                                                            <?php $skill = formatSkill($player['main_skill']); ?>
-                                                                            <span class="badge bg-<?= $skill['color'] ?> skill-badge">
-                                                                                <?= $skill['text'] ?>
-                                                                            </span>
-                                                                            <?php if ($player['secondary_skill']): ?>
-                                                                                <?php $secSkill = formatSkill($player['secondary_skill']); ?>
-                                                                                <span class="badge bg-<?= $secSkill['color'] ?> skill-badge">
-                                                                                    <?= $secSkill['text'] ?>
-                                                                                </span>
-                                                                            <?php endif; ?>
-                                                                        </div>
-                                                                    </div>
-                                                                </label>
-                                                            </div>
-                                                        </div>
-                                                    <?php endforeach; ?>
-                                                </div>
-                                            </div>
-                                        <?php endif; ?>
-                                    <?php endforeach; ?>
-                                </div>
-
-                                <!-- Registration Actions -->
-                                <div class="text-center mt-3">
-                                    <button type="button" id="registerSelectedBtn" class="btn btn-success btn-lg" disabled>
-                                        <i class="fas fa-user-plus"></i> Đăng ký các cầu thủ đã chọn (<span id="selectedCount">0</span>)
-                                    </button>
-                                </div>
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="mb-0">Danh sách cầu thủ:</h6>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAll()">
+                                    <i class="fas fa-check-square"></i> Chọn tất cả
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="unselectAll()">
+                                    <i class="fas fa-square"></i> Bỏ chọn
+                                </button>
                             </div>
-                        <?php endif; ?>
+                        </div>
 
-                        <!-- Registered Players by Position -->
-                        <?php
-                        $playersByPosition = [];
-                        foreach ($registeredPlayers as $player) {
-                            $playersByPosition[$player['main_position']][] = $player;
-                        }
-                        ?>
+                        <!-- Players Grid -->
+                        <div class="players-grid">
+                            <?php
+                            // Group unregistered players by position for display
+                            $unregisteredPlayers = [];
+                            foreach ($allPlayers as $player) {
+                                $isRegistered = array_filter($registeredPlayers, function($rp) use ($player) {
+                                    return $rp['id'] == $player['id'];
+                                });
+                                if (!$isRegistered) {
+                                    $unregisteredPlayers[$player['main_position']][] = $player;
+                                }
+                            }
+                            ?>
 
-                        <?php foreach (['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'] as $position): ?>
-                            <?php if (isset($playersByPosition[$position])): ?>
-                                <div class="mb-3">
-                                    <div class="position-header">
-                                        <?= formatPosition($position) ?> (<?= count($playersByPosition[$position]) ?>)
-                                    </div>
-                                    <div class="row">
-                                        <?php foreach ($playersByPosition[$position] as $player): ?>
-                                            <div class="col-md-6 col-lg-4 mb-2">
-                                                <div class="player-card p-3">
-                                                    <div class="d-flex justify-content-between align-items-start">
-                                                        <div>
-                                                            <strong><?= htmlspecialchars($player['name']) ?></strong>
-                                                            <div class="small text-muted">
-                                                                <?= $player['secondary_position'] ? formatPosition($player['secondary_position']) : '' ?>
+                            <?php foreach (['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'] as $position): ?>
+                                <?php if (isset($unregisteredPlayers[$position])): ?>
+                                    <div class="position-group">
+                                        <div class="position-title">
+                                            <?= formatPosition($position) ?> (<?= count($unregisteredPlayers[$position]) ?> người)
+                                        </div>
+                                        <div class="row g-2">
+                                            <?php foreach ($unregisteredPlayers[$position] as $player): ?>
+                                                <div class="col-12">
+                                                    <div class="form-check">
+                                                        <input class="form-check-input player-checkbox" 
+                                                               type="checkbox" 
+                                                               value="<?= $player['id'] ?>" 
+                                                               id="player_<?= $player['id'] ?>">
+                                                        <label class="form-check-label" for="player_<?= $player['id'] ?>">
+                                                            <div class="player-select-card p-2 border rounded d-flex justify-content-between align-items-center">
+                                                                <div>
+                                                                    <div class="fw-bold"><?= htmlspecialchars($player['name']) ?></div>
+                                                                    <div class="small text-muted">
+                                                                        <?= $player['secondary_position'] ? formatPosition($player['secondary_position']) : 'Không có vị trí phụ' ?>
+                                                                    </div>
+                                                                </div>
+                                                                <div>
+                                                                    <?php $skill = formatSkill($player['main_skill']); ?>
+                                                                    <span class="badge bg-<?= $skill['color'] ?> skill-badge">
+                                                                        <?= $skill['text'] ?>
+                                                                    </span>
+                                                                </div>
                                                             </div>
-                                                        </div>
-                                                        <?php if (!$isLocked): ?>
-                                                            <button class="btn btn-sm btn-outline-danger remove-player" 
-                                                                    data-player-id="<?= $player['id'] ?>">
-                                                                <i class="fas fa-times"></i>
-                                                            </button>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                    <div class="mt-2">
-                                                        <?php $skill = formatSkill($player['main_skill']); ?>
-                                                        <span class="badge bg-<?= $skill['color'] ?> skill-badge">
-                                                            <?= $skill['text'] ?>
-                                                        </span>
-                                                        <?php if ($player['secondary_skill']): ?>
-                                                            <?php $secSkill = formatSkill($player['secondary_skill']); ?>
-                                                            <span class="badge bg-<?= $secSkill['color'] ?> skill-badge">
-                                                                <?= $secSkill['text'] ?>
-                                                            </span>
-                                                        <?php endif; ?>
+                                                        </label>
                                                     </div>
                                                 </div>
-                                            </div>
-                                        <?php endforeach; ?>
+                                            <?php endforeach; ?>
+                                        </div>
                                     </div>
-                                </div>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <!-- Registration Actions -->
+                        <div class="text-center mt-3">
+                            <button type="button" id="registerSelectedBtn" class="btn btn-success btn-lg w-100" disabled>
+                                <i class="fas fa-user-plus"></i> Đăng ký cầu thủ đã chọn (<span id="selectedCount">0</span>)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Registered Players -->
+                <div class="card card-custom mb-4">
+                    <div class="card-header">
+                        <h5 class="mb-0">
+                            <i class="fas fa-users me-2"></i>
+                            Cầu thủ đã đăng ký (<span id="totalRegistered"><?= count($registeredPlayers) ?></span>)
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="registered-players">
+                            <?php
+                            $playersByPosition = [];
+                            foreach ($registeredPlayers as $player) {
+                                $playersByPosition[$player['main_position']][] = $player;
+                            }
+                            ?>
+
+                            <?php foreach (['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'] as $position): ?>
+                                <?php if (isset($playersByPosition[$position])): ?>
+                                    <div class="position-group">
+                                        <div class="position-title">
+                                            <?= formatPosition($position) ?> (<?= count($playersByPosition[$position]) ?>)
+                                        </div>
+                                        <div class="position-players" data-position="<?= $position ?>">
+                                            <?php foreach ($playersByPosition[$position] as $player): ?>
+                                                <div class="player-compact" data-player-id="<?= $player['id'] ?>">
+                                                    <div class="flex-grow-1">
+                                                        <strong><?= htmlspecialchars($player['name']) ?></strong>
+                                                        <div class="small text-muted d-flex gap-1 mt-1">
+                                                            <?php $skill = formatSkill($player['main_skill']); ?>
+                                                            <span class="badge bg-<?= $skill['color'] ?> skill-badge">
+                                                                <?= $skill['text'] ?>
+                                                            </span>
+                                                            <?php if ($player['secondary_skill']): ?>
+                                                                <?php $secSkill = formatSkill($player['secondary_skill']); ?>
+                                                                <span class="badge bg-<?= $secSkill['color'] ?> skill-badge">
+                                                                    <?= $secSkill['text'] ?>
+                                                                </span>
+                                                            <?php endif; ?>
+                                                        </div>
+                                                    </div>
+                                                    <button class="btn btn-sm btn-outline-danger remove-player" 
+                                                            data-player-id="<?= $player['id'] ?>"
+                                                            title="Hủy đăng ký">
+                                                        <i class="fas fa-times"></i>
+                                                    </button>
+                                                </div>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                            <?php endforeach; ?>
+                        </div>
 
                         <!-- Team Division Actions -->
                         <?php if (count($registeredPlayers) >= MIN_PLAYERS): ?>
                             <div class="text-center mt-4">
-                                <button id="divideTeamsBtn" class="btn btn-success btn-lg me-2">
+                                <button id="divideTeamsBtn" class="btn btn-success btn-lg w-100 mb-2">
                                     <i class="fas fa-random"></i> Chia đội tự động
                                 </button>
-                                <button id="previewBtn" class="btn btn-outline-success btn-lg">
+                                <button id="previewBtn" class="btn btn-outline-success btn-lg w-100">
                                     <i class="fas fa-eye"></i> Xem trước
                                 </button>
                             </div>
@@ -380,10 +438,13 @@ $allPlayers = $stmt->fetchAll();
                         <?php endif; ?>
                     </div>
                 </div>
+            </div>
 
-                <!-- Today's Match Result -->
+            <!-- Middle Column: Formation Display -->
+            <div class="col-lg-4">
+                <!-- Today's Match Formation -->
                 <?php if ($todayMatch): ?>
-                    <div class="card card-custom">
+                    <div class="card card-custom mb-4">
                         <div class="card-header">
                             <h5 class="mb-0">
                                 <i class="fas fa-trophy me-2"></i>
@@ -408,20 +469,37 @@ $allPlayers = $stmt->fetchAll();
                                         </div>
                                     </div>
                                 </div>
-                            <?php elseif ($todayMatch['status'] === 'locked'): ?>
+                            <?php elseif ($todayMatch['status'] === 'scheduled'): ?>
                                 <div class="alert alert-info">
-                                    <i class="fas fa-lock"></i> Đội hình đã được khóa, chờ thi đấu...
+                                    <i class="fas fa-users"></i> Đội hình đã được tạo. Vẫn có thể đăng ký thêm cầu thủ.
                                 </div>
                             <?php endif; ?>
                             
-                            <div id="todayFormation"></div>
+                            <div class="formation-display" id="todayFormation"></div>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="card card-custom mb-4">
+                        <div class="card-header">
+                            <h5 class="mb-0">
+                                <i class="fas fa-futbol me-2"></i>
+                                Đội hình dự kiến
+                            </h5>
+                        </div>
+                        <div class="card-body text-center">
+                            <div class="py-5">
+                                <i class="fas fa-users fa-3x text-muted mb-3"></i>
+                                <h6 class="text-muted">Chưa có đội hình</h6>
+                                <p class="text-muted small">Đăng ký đủ <?= MIN_PLAYERS ?> cầu thủ và click "Chia đội tự động" để tạo đội hình</p>
+                            </div>
                         </div>
                     </div>
                 <?php endif; ?>
             </div>
 
-            <!-- Right Column: Stats & History -->
+            <!-- Right Column: Quick Access & Stats -->
             <div class="col-lg-4">
+
                 <!-- Quick Access Panel -->
                 <div class="card card-custom mb-4">
                     <div class="card-header">
@@ -451,55 +529,21 @@ $allPlayers = $stmt->fetchAll();
                         <div class="small text-muted">
                             <div class="d-flex justify-content-between mb-1">
                                 <span>Hôm nay:</span>
-                                <span class="fw-bold"><?= count($registeredPlayers) ?>/32 người</span>
+                                <span class="fw-bold"><span id="currentTotal"><?= count($registeredPlayers) ?></span> người</span>
                             </div>
                             <div class="d-flex justify-content-between mb-1">
                                 <span>Trạng thái:</span>
-                                <span class="<?= $isLocked ? 'text-danger' : 'text-success' ?> fw-bold">
-                                    <?= $isLocked ? 'Đã khóa' : 'Đang mở' ?>
-                                </span>
+                                <span class="text-success fw-bold">Luôn mở</span>
                             </div>
                             <?php if ($todayMatch): ?>
                                 <div class="d-flex justify-content-between">
                                     <span>Đội hình:</span>
-                                    <span class="text-info fw-bold">Đã tạo</span>
+                                    <span class="text-info fw-bold">
+                                        <?= $todayMatch['status'] === 'completed' ? 'Đã hoàn thành' : 'Đã tạo' ?>
+                                    </span>
                                 </div>
                             <?php endif; ?>
                         </div>
-                    </div>
-                </div>
-
-                <!-- Quick Stats -->
-                <div class="card card-custom mb-4">
-                    <div class="card-header">
-                        <h6 class="mb-0">
-                            <i class="fas fa-chart-bar me-2"></i>
-                            Thống kê nhanh
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <?php
-                        // Get top players stats
-                        $stmt = $pdo->query("
-                            SELECT name, total_points, total_matches, total_wins, total_goals 
-                            FROM players 
-                            WHERE total_matches > 0
-                            ORDER BY total_points DESC 
-                            LIMIT 5
-                        ");
-                        $topPlayers = $stmt->fetchAll();
-                        ?>
-                        
-                        <h6>🏆 Top 5 Điểm số:</h6>
-                        <?php foreach ($topPlayers as $index => $player): ?>
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span>
-                                    <span class="badge bg-secondary"><?= $index + 1 ?></span>
-                                    <?= htmlspecialchars($player['name']) ?>
-                                </span>
-                                <strong><?= $player['total_points'] ?> điểm</strong>
-                            </div>
-                        <?php endforeach; ?>
                     </div>
                 </div>
 
@@ -593,6 +637,14 @@ $allPlayers = $stmt->fetchAll();
             updateSelectedCount();
         }
 
+        // Update UI counters
+        function updateCounters() {
+            const currentRegistered = document.querySelectorAll('.player-compact').length;
+            document.getElementById('registeredCount').textContent = currentRegistered;
+            document.getElementById('totalRegistered').textContent = currentRegistered;
+            document.getElementById('currentTotal').textContent = currentRegistered;
+        }
+
         // Register selected players
         document.getElementById('registerSelectedBtn')?.addEventListener('click', function() {
             const selectedPlayers = Array.from(document.querySelectorAll('.player-checkbox:checked'))
@@ -654,6 +706,10 @@ $allPlayers = $stmt->fetchAll();
                     return;
                 }
                 
+                // Add loading state
+                this.disabled = true;
+                this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                
                 fetch('api.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -667,13 +723,23 @@ $allPlayers = $stmt->fetchAll();
                 .then(data => {
                     if (data.error) {
                         alert(data.error);
+                        this.disabled = false;
+                        this.innerHTML = '<i class="fas fa-times"></i>';
                     } else {
-                        location.reload();
+                        // Remove from UI immediately
+                        const playerElement = this.closest('.player-compact');
+                        playerElement.style.animation = 'fadeOut 0.3s ease-out forwards';
+                        setTimeout(() => {
+                            playerElement.remove();
+                            updateCounters();
+                        }, 300);
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     alert('Có lỗi xảy ra khi hủy đăng ký');
+                    this.disabled = false;
+                    this.innerHTML = '<i class="fas fa-times"></i>';
                 });
             });
         });
@@ -688,6 +754,12 @@ $allPlayers = $stmt->fetchAll();
         });
 
         function divideTeams(preview = false) {
+            const btn = preview ? document.getElementById('previewBtn') : document.getElementById('divideTeamsBtn');
+            const originalText = btn.innerHTML;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (preview ? 'Đang xử lý...' : 'Đang chia đội...');
+            
             fetch('api.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -699,15 +771,23 @@ $allPlayers = $stmt->fetchAll();
             })
             .then(response => response.json())
             .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+                
                 if (data.error) {
                     alert(data.error);
                 } else {
                     showFormation(data.data, preview);
+                    if (!preview) {
+                        setTimeout(() => location.reload(), 2000);
+                    }
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 alert('Có lỗi xảy ra khi chia đội');
+                btn.disabled = false;
+                btn.innerHTML = originalText;
             });
         }
 
@@ -738,6 +818,7 @@ $allPlayers = $stmt->fetchAll();
                     </div>
                     <div class="col-md-4 text-center">
                         <div class="h5">VS</div>
+                        <div class="small text-muted">Sức mạnh cân bằng</div>
                     </div>
                     <div class="col-md-4 text-center">
                         <div class="h4">🔵 Đội B</div>
@@ -774,7 +855,7 @@ $allPlayers = $stmt->fetchAll();
                                          player.skill_level === 'Trung bình' ? 'warning' : 'secondary';
                         
                         html += `
-                            <div class="border rounded p-2 mb-2">
+                            <div class="border rounded p-2 mb-2 bg-white">
                                 <strong>${player.name}</strong>
                                 <div class="small">
                                     <span class="badge bg-info">${player.position_type}</span>
@@ -807,7 +888,30 @@ $allPlayers = $stmt->fetchAll();
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
             updateSelectedCount();
+            updateCounters();
+            
+            // Add CSS animations
+            const style = document.createElement('style');
+            style.textContent = `
+                @keyframes fadeOut {
+                    from { opacity: 1; transform: scale(1); }
+                    to { opacity: 0; transform: scale(0.8); }
+                }
+                
+                .player-compact {
+                    animation: fadeIn 0.3s ease-in forwards;
+                }
+                
+                @keyframes fadeIn {
+                    from { opacity: 0; transform: translateY(-10px); }
+                    to { opacity: 1; transform: translateY(0); }
+                }
+            `;
+            document.head.appendChild(style);
         });
+
+        // Auto-refresh counters every 30 seconds
+        setInterval(updateCounters, 30000);
     </script>
 </body>
 </html>
