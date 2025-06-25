@@ -115,9 +115,48 @@ $recentMatches = $stmt->fetchAll();
             padding: 2px 6px;
             border-radius: 8px;
         }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .nav-link {
+            font-weight: 500;
+        }
     </style>
 </head>
 <body class="gradient-bg">
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="index.php">
+                <i class="fas fa-futbol"></i> Football League
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.php">
+                            <i class="fas fa-user-plus"></i> Đăng ký
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="match_result.php">
+                            <i class="fas fa-edit"></i> Quản lý kết quả
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="leaderboard.php">
+                            <i class="fas fa-trophy"></i> Bảng xếp hạng
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
     <div class="container py-4">
         <!-- Header -->
         <div class="card card-custom mb-4">
@@ -133,12 +172,14 @@ $recentMatches = $stmt->fetchAll();
                         </p>
                     </div>
                     <div class="col-md-4 text-end">
-                        <a href="index.php" class="btn btn-outline-primary">
-                            <i class="fas fa-home"></i> Trang chủ
-                        </a>
-                        <a href="leaderboard.php" class="btn btn-outline-success">
-                            <i class="fas fa-trophy"></i> Bảng xếp hạng
-                        </a>
+                        <div class="btn-group">
+                            <a href="index.php" class="btn btn-outline-primary">
+                                <i class="fas fa-home"></i> Trang chủ
+                            </a>
+                            <a href="leaderboard.php" class="btn btn-outline-success">
+                                <i class="fas fa-trophy"></i> Bảng xếp hạng
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -154,28 +195,30 @@ $recentMatches = $stmt->fetchAll();
                         </h6>
                     </div>
                     <div class="card-body p-0">
-                        <?php foreach ($recentMatches as $recentMatch): ?>
-                            <a href="match_result.php?id=<?= $recentMatch['id'] ?>" 
-                               class="list-group-item list-group-item-action <?= $recentMatch['id'] == $matchId ? 'active' : '' ?>">
-                                <div class="d-flex justify-content-between">
-                                    <span><?= date('d/m', strtotime($recentMatch['match_date'])) ?></span>
-                                    <?php if ($recentMatch['status'] === 'completed'): ?>
-                                        <span class="badge bg-success">
-                                            <?= $recentMatch['team_a_score'] ?>-<?= $recentMatch['team_b_score'] ?>
-                                        </span>
-                                    <?php else: ?>
-                                        <span class="badge bg-secondary">
-                                            <?= $recentMatch['status'] === 'locked' ? 'Khóa' : 'Chờ' ?>
-                                        </span>
-                                    <?php endif; ?>
-                                </div>
-                            </a>
-                        <?php endforeach; ?>
+                        <div class="list-group list-group-flush">
+                            <?php foreach ($recentMatches as $recentMatch): ?>
+                                <a href="match_result.php?id=<?= $recentMatch['id'] ?>" 
+                                   class="list-group-item list-group-item-action <?= $recentMatch['id'] == $matchId ? 'active' : '' ?>">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span><?= date('d/m', strtotime($recentMatch['match_date'])) ?></span>
+                                        <?php if ($recentMatch['status'] === 'completed'): ?>
+                                            <span class="badge bg-success">
+                                                <?= $recentMatch['team_a_score'] ?>-<?= $recentMatch['team_b_score'] ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="badge bg-secondary">
+                                                <?= $recentMatch['status'] === 'locked' ? 'Khóa' : 'Chờ' ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </div>
+                                </a>
+                            <?php endforeach; ?>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Match Result Form -->
+            <!-- Main Content -->
             <div class="col-lg-9">
                 <?php if ($match['status'] === 'completed'): ?>
                     <!-- Display completed match result -->
@@ -184,7 +227,7 @@ $recentMatches = $stmt->fetchAll();
                             <h2 class="text-success mb-4">🎉 Kết quả trận đấu</h2>
                             <div class="row">
                                 <div class="col-4">
-                                    <h3 class="text-danger">Đội A</h3>
+                                    <h3 class="text-danger">🔴 Đội A</h3>
                                     <div class="display-4 text-danger"><?= $match['team_a_score'] ?></div>
                                 </div>
                                 <div class="col-4">
@@ -198,12 +241,13 @@ $recentMatches = $stmt->fetchAll();
                                     </div>
                                 </div>
                                 <div class="col-4">
-                                    <h3 class="text-primary">Đội B</h3>
+                                    <h3 class="text-primary">🔵 Đội B</h3>
                                     <div class="display-4 text-primary"><?= $match['team_b_score'] ?></div>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    
                 <?php elseif ($canUpdate): ?>
                     <!-- Score input form -->
                     <div class="card card-custom mb-4">
@@ -252,10 +296,14 @@ $recentMatches = $stmt->fetchAll();
                             </form>
                         </div>
                     </div>
+                    
                 <?php else: ?>
                     <div class="alert alert-warning">
                         <i class="fas fa-clock"></i>
                         Chỉ có thể cập nhật kết quả sau 7h sáng ngày <?= date('d/m/Y', strtotime($match['match_date'] . ' +1 day')) ?>
+                        <?php if (defined('TEST_MODE') && TEST_MODE): ?>
+                            <br><span class="text-info">Test Mode: Thời gian đã được bỏ khóa</span>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
 
@@ -274,10 +322,10 @@ $recentMatches = $stmt->fetchAll();
                                     <h5 class="text-danger mb-3">🔴 Đội A (<?= count($teamA) ?> người)</h5>
                                     <?php foreach ($teamA as $player): ?>
                                         <div class="player-row">
-                                            <div class="d-flex justify-content-between align-items-center">
-                                                <div>
+                                            <div class="d-flex justify-content-between align-items-start">
+                                                <div class="flex-grow-1">
                                                     <strong><?= htmlspecialchars($player['name']) ?></strong>
-                                                    <div class="small">
+                                                    <div class="small mt-1">
                                                         <span class="badge bg-info position-badge">
                                                             <?= $player['assigned_position'] ?>
                                                         </span>
@@ -288,21 +336,33 @@ $recentMatches = $stmt->fetchAll();
                                                     </div>
                                                 </div>
                                                 
-                                                <?php if ($canUpdate && $match['status'] !== 'completed'): ?>
-                                                    <div class="d-flex gap-2">
-                                                        <div>
-                                                            <label class="form-label small">Bàn thắng</label>
-                                                            <input type="number" 
-                                                                   class="form-control stat-input" 
-                                                                   data-player="<?= $player['player_id'] ?>"
-                                                                   data-stat="assists"
-                                                                   min="0" 
-                                                                   max="10" 
-                                                                   value="<?= $player['assists'] ?? 0 ?>">
+                                                <div class="text-end">
+                                                    <?php if ($canUpdate && $match['status'] !== 'completed'): ?>
+                                                        <!-- Editable stats -->
+                                                        <div class="d-flex gap-2 align-items-center">
+                                                            <div class="text-center">
+                                                                <label class="form-label small mb-1">Bàn thắng</label>
+                                                                <input type="number" 
+                                                                       class="form-control stat-input" 
+                                                                       data-player="<?= $player['player_id'] ?>"
+                                                                       data-stat="goals"
+                                                                       min="0" 
+                                                                       max="10" 
+                                                                       value="<?= $player['goals'] ?? 0 ?>">
+                                                            </div>
+                                                            <div class="text-center">
+                                                                <label class="form-label small mb-1">Kiến tạo</label>
+                                                                <input type="number" 
+                                                                       class="form-control stat-input" 
+                                                                       data-player="<?= $player['player_id'] ?>"
+                                                                       data-stat="assists"
+                                                                       min="0" 
+                                                                       max="10" 
+                                                                       value="<?= $player['assists'] ?? 0 ?>">
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                <?php else: ?>
-                                                    <div class="text-end">
+                                                    <?php else: ?>
+                                                        <!-- Display stats -->
                                                         <div class="small">
                                                             <span class="badge bg-success"><?= $player['goals'] ?? 0 ?> bàn</span>
                                                             <span class="badge bg-primary"><?= $player['assists'] ?? 0 ?> kiến tạo</span>
@@ -312,8 +372,72 @@ $recentMatches = $stmt->fetchAll();
                                                                 <span class="badge bg-warning">+<?= $player['points_earned'] ?? 0 ?> điểm</span>
                                                             </div>
                                                         <?php endif; ?>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+
+                            <!-- Team B -->
+                            <div class="col-md-6">
+                                <div class="team-section team-b">
+                                    <h5 class="text-primary mb-3">🔵 Đội B (<?= count($teamB) ?> người)</h5>
+                                    <?php foreach ($teamB as $player): ?>
+                                        <div class="player-row">
+                                            <div class="d-flex justify-content-between align-items-start">
+                                                <div class="flex-grow-1">
+                                                    <strong><?= htmlspecialchars($player['name']) ?></strong>
+                                                    <div class="small mt-1">
+                                                        <span class="badge bg-info position-badge">
+                                                            <?= $player['assigned_position'] ?>
+                                                        </span>
+                                                        <span class="badge bg-<?= $player['skill_level'] === 'Tốt' ? 'success' : ($player['skill_level'] === 'Trung bình' ? 'warning' : 'secondary') ?> skill-badge">
+                                                            <?= $player['skill_level'] ?>
+                                                        </span>
+                                                        <span class="text-muted small">(<?= $player['position_type'] ?>)</span>
                                                     </div>
-                                                <?php endif; ?>
+                                                </div>
+                                                
+                                                <div class="text-end">
+                                                    <?php if ($canUpdate && $match['status'] !== 'completed'): ?>
+                                                        <!-- Editable stats -->
+                                                        <div class="d-flex gap-2 align-items-center">
+                                                            <div class="text-center">
+                                                                <label class="form-label small mb-1">Bàn thắng</label>
+                                                                <input type="number" 
+                                                                       class="form-control stat-input" 
+                                                                       data-player="<?= $player['player_id'] ?>"
+                                                                       data-stat="goals"
+                                                                       min="0" 
+                                                                       max="10" 
+                                                                       value="<?= $player['goals'] ?? 0 ?>">
+                                                            </div>
+                                                            <div class="text-center">
+                                                                <label class="form-label small mb-1">Kiến tạo</label>
+                                                                <input type="number" 
+                                                                       class="form-control stat-input" 
+                                                                       data-player="<?= $player['player_id'] ?>"
+                                                                       data-stat="assists"
+                                                                       min="0" 
+                                                                       max="10" 
+                                                                       value="<?= $player['assists'] ?? 0 ?>">
+                                                            </div>
+                                                        </div>
+                                                    <?php else: ?>
+                                                        <!-- Display stats -->
+                                                        <div class="small">
+                                                            <span class="badge bg-success"><?= $player['goals'] ?? 0 ?> bàn</span>
+                                                            <span class="badge bg-primary"><?= $player['assists'] ?? 0 ?> kiến tạo</span>
+                                                        </div>
+                                                        <?php if ($match['status'] === 'completed'): ?>
+                                                            <div class="small mt-1">
+                                                                <span class="badge bg-warning">+<?= $player['points_earned'] ?? 0 ?> điểm</span>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    <?php endif; ?>
+                                                </div>
                                             </div>
                                         </div>
                                     <?php endforeach; ?>
@@ -323,9 +447,10 @@ $recentMatches = $stmt->fetchAll();
 
                         <?php if ($canUpdate && $match['status'] !== 'completed'): ?>
                             <div class="text-center mt-4">
-                                <button id="saveAllBtn" class="btn btn-primary btn-lg">
-                                    <i class="fas fa-save"></i> Lưu tất cả thống kê
-                                </button>
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i>
+                                    Nhập tỷ số và thống kê cầu thủ, sau đó click "Lưu kết quả" để hoàn tất.
+                                </div>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -348,6 +473,11 @@ $recentMatches = $stmt->fetchAll();
                 return;
             }
             
+            if (teamAScore < 0 || teamBScore < 0) {
+                alert('Tỷ số không được âm');
+                return;
+            }
+            
             // Collect player stats
             const playerStats = {};
             document.querySelectorAll('.stat-input').forEach(input => {
@@ -356,10 +486,15 @@ $recentMatches = $stmt->fetchAll();
                 const value = parseInt(input.value) || 0;
                 
                 if (!playerStats[playerId]) {
-                    playerStats[playerId] = {};
+                    playerStats[playerId] = { goals: 0, assists: 0 };
                 }
                 playerStats[playerId][stat] = value;
             });
+            
+            // Confirm before saving
+            if (!confirm(`Xác nhận lưu kết quả: Đội A ${teamAScore} - ${teamBScore} Đội B?`)) {
+                return;
+            }
             
             // Save match result
             fetch('api.php', {
@@ -376,7 +511,7 @@ $recentMatches = $stmt->fetchAll();
             .then(response => response.json())
             .then(data => {
                 if (data.error) {
-                    alert(data.error);
+                    alert('Lỗi: ' + data.error);
                 } else {
                     alert('Cập nhật kết quả thành công!');
                     location.reload();
@@ -388,107 +523,49 @@ $recentMatches = $stmt->fetchAll();
             });
         });
 
-        // Save all stats button
-        document.getElementById('saveAllBtn')?.addEventListener('click', function() {
-            // Just save player stats without match result
-            const playerStats = {};
-            document.querySelectorAll('.stat-input').forEach(input => {
-                const playerId = input.dataset.player;
-                const stat = input.dataset.stat;
-                const value = parseInt(input.value) || 0;
-                
-                if (!playerStats[playerId]) {
-                    playerStats[playerId] = {};
-                }
-                playerStats[playerId][stat] = value;
-            });
-            
-            // Update participant stats without completing match
-            fetch('api.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'update_participant_stats',
-                    match_id: <?= $matchId ?>,
-                    player_stats: playerStats
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    alert(data.error);
-                } else {
-                    alert('Lưu thống kê thành công!');
-                }
-            });
-        });
-
-        // Reset scores
+        // Reset scores function
         function resetScores() {
-            document.getElementById('teamAScore').value = 0;
-            document.getElementById('teamBScore').value = 0;
-            
-            // Reset all player stats
-            document.querySelectorAll('.stat-input').forEach(input => {
-                input.value = 0;
-            });
+            if (confirm('Bạn có chắc muốn reset tất cả dữ liệu?')) {
+                document.getElementById('teamAScore').value = 0;
+                document.getElementById('teamBScore').value = 0;
+                
+                // Reset all player stats
+                document.querySelectorAll('.stat-input').forEach(input => {
+                    input.value = 0;
+                });
+            }
         }
 
-        // Auto-save stats when changed
+        // Auto-validate input
         document.querySelectorAll('.stat-input').forEach(input => {
-            input.addEventListener('change', function() {
-                // Optional: auto-save individual stats
-                console.log(`Player ${this.dataset.player} ${this.dataset.stat}: ${this.value}`);
+            input.addEventListener('input', function() {
+                if (this.value < 0) this.value = 0;
+                if (this.value > 10) this.value = 10;
             });
         });
-
-        // Calculate total goals for validation
-        function validateGoals() {
-            const teamAScore = parseInt(document.getElementById('teamAScore')?.value) || 0;
-            const teamBScore = parseInt(document.getElementById('teamBScore')?.value) || 0;
-            
-            let teamAGoals = 0;
-            let teamBGoals = 0;
-            
-            document.querySelectorAll('[data-stat="goals"]').forEach(input => {
-                const playerId = input.dataset.player;
-                const goals = parseInt(input.value) || 0;
-                
-                // Find if player is in team A or B (you'd need to pass this data)
-                // This is a simplified version
-                teamAGoals += goals;
-            });
-            
-            // You can add validation here to ensure individual goals sum matches team score
-        }
-
-        // Quick stats buttons
-        function addGoal(playerId) {
-            const input = document.querySelector(`[data-player="${playerId}"][data-stat="goals"]`);
-            if (input) {
-                input.value = (parseInt(input.value) || 0) + 1;
-                input.dispatchEvent(new Event('change'));
-            }
-        }
-
-        function addAssist(playerId) {
-            const input = document.querySelector(`[data-player="${playerId}"][data-stat="assists"]`);
-            if (input) {
-                input.value = (parseInt(input.value) || 0) + 1;
-                input.dispatchEvent(new Event('change'));
-            }
-        }
 
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             // Ctrl/Cmd + S to save
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();
-                document.getElementById('matchResultForm')?.dispatchEvent(new Event('submit'));
+                const form = document.getElementById('matchResultForm');
+                if (form) {
+                    form.dispatchEvent(new Event('submit'));
+                }
             }
         });
 
-        // Real-time score validation
+        // Auto-focus first score input
+        document.addEventListener('DOMContentLoaded', function() {
+            const firstInput = document.getElementById('teamAScore');
+            if (firstInput && <?= $canUpdate && $match['status'] !== 'completed' ? 'true' : 'false' ?>) {
+                firstInput.focus();
+                firstInput.select();
+            }
+        });
+
+        // Real-time validation
         ['teamAScore', 'teamBScore'].forEach(id => {
             const input = document.getElementById(id);
             if (input) {
@@ -498,86 +575,6 @@ $recentMatches = $stmt->fetchAll();
                 });
             }
         });
-
-        // Auto-focus first input
-        document.addEventListener('DOMContentLoaded', function() {
-            const firstInput = document.querySelector('.score-input');
-            if (firstInput && <?= $canUpdate && $match['status'] !== 'completed' ? 'true' : 'false' ?>) {
-                firstInput.focus();
-            }
-        });
     </script>
 </body>
-</html>="goals"
-                                                                   min="0" 
-                                                                   max="10" 
-                                                                   value="<?= $player['goals'] ?? 0 ?>">
-                                                        </div>
-                                                        <div>
-                                                            <label class="form-label small">Kiến tạo</label>
-                                                            <input type="number" 
-                                                                   class="form-control stat-input" 
-                                                                   data-player="<?= $player['player_id'] ?>"
-                                                                   data-stat="assists"
-                                                                   min="0" 
-                                                                   max="10" 
-                                                                   value="<?= $player['assists'] ?? 0 ?>">
-                                                        </div>
-                                                    </div>
-                                                <?php else: ?>
-                                                    <div class="text-end">
-                                                        <div class="small">
-                                                            <span class="badge bg-success"><?= $player['goals'] ?? 0 ?> bàn</span>
-                                                            <span class="badge bg-primary"><?= $player['assists'] ?? 0 ?> kiến tạo</span>
-                                                        </div>
-                                                        <?php if ($match['status'] === 'completed'): ?>
-                                                            <div class="small mt-1">
-                                                                <span class="badge bg-warning">+<?= $player['points_earned'] ?? 0 ?> điểm</span>
-                                                            </div>
-                                                        <?php endif; ?>
-                                                    </div>
-                                                <?php endif; ?>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-
-                            <!-- Team B -->
-                            <div class="col-md-6">
-                                <div class="team-section team-b">
-                                    <h5 class="text-primary mb-3">🔵 Đội B (<?= count($teamB) ?> người)</h5>
-                                    <?php foreach ($teamB as $player): ?>
-                                        <div class="player-row">
-                                            <div class="d-flex justify-content-between align-items-center">
-                                                <div>
-                                                    <strong><?= htmlspecialchars($player['name']) ?></strong>
-                                                    <div class="small">
-                                                        <span class="badge bg-info position-badge">
-                                                            <?= $player['assigned_position'] ?>
-                                                        </span>
-                                                        <span class="badge bg-<?= $player['skill_level'] === 'Tốt' ? 'success' : ($player['skill_level'] === 'Trung bình' ? 'warning' : 'secondary') ?> skill-badge">
-                                                            <?= $player['skill_level'] ?>
-                                                        </span>
-                                                        <span class="text-muted small">(<?= $player['position_type'] ?>)</span>
-                                                    </div>
-                                                </div>
-                                                
-                                                <?php if ($canUpdate && $match['status'] !== 'completed'): ?>
-                                                    <div class="d-flex gap-2">
-                                                        <div>
-                                                            <label class="form-label small">Bàn thắng</label>
-                                                            <input type="number" 
-                                                                   class="form-control stat-input" 
-                                                                   data-player="<?= $player['player_id'] ?>"
-                                                                   data-stat="goals"
-                                                                   min="0" 
-                                                                   max="10" 
-                                                                   value="<?= $player['goals'] ?? 0 ?>">
-                                                        </div>
-                                                        <div>
-                                                            <label class="form-label small">Kiến tạo</label>
-                                                            <input type="number" 
-                                                                   class="form-control stat-input" 
-                                                                   data-player="<?= $player['player_id'] ?>"
-                                                                   data-stat
+</html>

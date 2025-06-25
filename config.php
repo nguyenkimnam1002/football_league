@@ -45,11 +45,14 @@ class DB {
 }
 
 // Constants
-define('LOCK_TIME', '22:30:00');
-define('MATCH_START_TIME', '07:00:00');
-define('MIN_PLAYERS', 14);
+define('LOCK_TIME', '23:59:59'); // Tạm thời đổi thành 23:59 để test
+define('MATCH_START_TIME', '00:00:01'); // Tạm thời đổi thành 00:00 để test
+define('MIN_PLAYERS', 4); // Giảm xuống 4 để test dễ hơn
 define('POINTS_WIN', 3);
 define('POINTS_LOSE', 0);
+
+// Test mode - Bỏ comment dòng dưới để enable test mode
+define('TEST_MODE', true);
 
 // Timezone
 date_default_timezone_set('Asia/Ho_Chi_Minh');
@@ -68,6 +71,11 @@ function getCurrentDateTime() {
 }
 
 function isRegistrationLocked($date = null) {
+    // Nếu đang ở test mode, luôn return false (không bao giờ khóa)
+    if (defined('TEST_MODE') && TEST_MODE) {
+        return false;
+    }
+    
     if ($date === null) {
         $date = getCurrentDate();
     }
@@ -80,6 +88,11 @@ function isRegistrationLocked($date = null) {
 }
 
 function canUpdateMatchResult($matchDate) {
+    // Nếu đang ở test mode, luôn cho phép update
+    if (defined('TEST_MODE') && TEST_MODE) {
+        return true;
+    }
+    
     $currentDate = getCurrentDate();
     $currentTime = getCurrentTime();
     

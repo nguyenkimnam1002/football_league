@@ -15,7 +15,7 @@ CREATE TABLE players (
     total_assists INT DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;;
 
 -- Bảng trận đấu hàng ngày
 CREATE TABLE daily_matches (
@@ -30,7 +30,7 @@ CREATE TABLE daily_matches (
     completed_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;;
 
 -- Bảng tham gia trận đấu
 CREATE TABLE match_participants (
@@ -47,7 +47,7 @@ CREATE TABLE match_participants (
     FOREIGN KEY (match_id) REFERENCES daily_matches(id) ON DELETE CASCADE,
     FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
     UNIQUE KEY unique_player_match (match_id, player_id)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;;
 
 -- Bảng đăng ký tham gia hàng ngày
 CREATE TABLE daily_registrations (
@@ -58,7 +58,7 @@ CREATE TABLE daily_registrations (
     FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
     UNIQUE KEY unique_player_date (registration_date, player_id),
     INDEX idx_date (registration_date)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;;
 
 -- Bảng thống kê tổng hợp
 CREATE TABLE player_stats (
@@ -72,7 +72,7 @@ CREATE TABLE player_stats (
     points INT DEFAULT 0,
     FOREIGN KEY (player_id) REFERENCES players(id) ON DELETE CASCADE,
     UNIQUE KEY unique_player_month (player_id, month)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;;
 
 -- Bảng cấu hình hệ thống
 CREATE TABLE system_config (
@@ -81,7 +81,7 @@ CREATE TABLE system_config (
     config_value TEXT NOT NULL,
     description TEXT,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;;
 
 -- Chèn dữ liệu mẫu cầu thủ
 INSERT INTO players (name, main_position, secondary_position, main_skill, secondary_skill) VALUES
