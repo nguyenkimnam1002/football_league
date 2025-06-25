@@ -1,15 +1,44 @@
 <?php
+// Tắt hiển thị lỗi PHP để không ảnh hưởng JSON response
+ini_set('display_errors', 0);
+error_reporting(0);
+
 require_once 'config.php';
 require_once 'TeamDivision.php';
 
+// Set headers trước khi có bất kỳ output nào
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-cache, must-revalidate');
 
+// Bắt tất cả output buffer để tránh output không mong muốn
+ob_start();
+
+// Kiểm tra method
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    errorResponse('Method not allowed', 405);
+    ob_clean();
+    http_response_code(405);
+    echo json_encode(['error' => 'Method not allowed'], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
+// Đọc và parse JSON input
 $input = json_decode(file_get_contents('php://input'), true);
+
+if (json_last_error() !== JSON_ERROR_NONE) {
+    ob_clean();
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid JSON input'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $action = $input['action'] ?? '';
+
+if (empty($action)) {
+    ob_clean();
+    http_response_code(400);
+    echo json_encode(['error' => 'Action is required'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 $pdo = DB::getInstance();
 
@@ -31,15 +60,17 @@ try {
             updateMatchResult($input);
             break;
             
-        case 'update_player_stats':
-            updatePlayerStats($input);
-            break;
-            
         default:
-            errorResponse('Invalid action');
+            ob_clean();
+            http_response_code(400);
+            echo json_encode(['error' => 'Invalid action: ' . $action], JSON_UNESCAPED_UNICODE);
+            exit;
     }
 } catch (Exception $e) {
-    errorResponse($e->getMessage());
+    ob_clean();
+    http_response_code(500);
+    echo json_encode(['error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 function registerPlayer($input) {
@@ -49,11 +80,11 @@ function registerPlayer($input) {
     $date = $input['date'] ?? getCurrentDate();
     
     if (!$playerId) {
-        errorResponse('Player ID is required');
+        throw new Exception('Player ID is required');
     }
     
     if (isRegistrationLocked()) {
-        errorResponse('Đăng ký đã được khóa (sau 22h30)');
+        throw new Exception('Đăng ký đã được khóa (sau 22h30)');
     }
     
     // Check if player exists
@@ -62,7 +93,7 @@ function registerPlayer($input) {
     $player = $stmt->fetch();
     
     if (!$player) {
-        errorResponse('Cầu thủ không tồn tại');
+        throw new Exception('Cầu thủ không tồn tại');
     }
     
     // Check if already registered
@@ -73,7 +104,7 @@ function registerPlayer($input) {
     $stmt->execute([$playerId, $date]);
     
     if ($stmt->fetch()) {
-        errorResponse('Cầu thủ đã đăng ký rồi');
+        throw new Exception('Cầu thủ đã đăng ký rồi');
     }
     
     // Register player
@@ -83,7 +114,9 @@ function registerPlayer($input) {
     ");
     $stmt->execute([$playerId, $date]);
     
-    successResponse('Đăng ký thành công');
+    ob_clean();
+    echo json_encode(['success' => 'Đăng ký thành công'], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 function unregisterPlayer($input) {
@@ -93,11 +126,11 @@ function unregisterPlayer($input) {
     $date = $input['date'] ?? getCurrentDate();
     
     if (!$playerId) {
-        errorResponse('Player ID is required');
+        throw new Exception('Player ID is required');
     }
     
     if (isRegistrationLocked()) {
-        errorResponse('Đăng ký đã được khóa (sau 22h30)');
+        throw new Exception('Đăng ký đã được khóa (sau 22h30)');
     }
     
     $stmt = $pdo->prepare("
@@ -106,7 +139,9 @@ function unregisterPlayer($input) {
     ");
     $stmt->execute([$playerId, $date]);
     
-    successResponse('Hủy đăng ký thành công');
+    ob_clean();
+    echo json_encode(['success' => 'Hủy đăng ký thành công'], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 function divideTeams($input) {
@@ -127,7 +162,7 @@ function divideTeams($input) {
     $players = $stmt->fetchAll();
     
     if (count($players) < MIN_PLAYERS) {
-        errorResponse('Cần ít nhất ' . MIN_PLAYERS . ' cầu thủ để chia đội');
+        throw new Exception('Cần ít nhất ' . MIN_PLAYERS . ' cầu thủ để chia đội');
     }
     
     // Divide teams using the algorithm
@@ -147,12 +182,16 @@ function divideTeams($input) {
             ");
             $stmt->execute([$matchId]);
             
-            successResponse('Đội hình đã được lưu và khóa', $result);
+            ob_clean();
+            echo json_encode(['success' => 'Đội hình đã được lưu và khóa', 'data' => $result], JSON_UNESCAPED_UNICODE);
+            exit;
         } catch (Exception $e) {
-            errorResponse('Lỗi khi lưu đội hình: ' . $e->getMessage());
+            throw new Exception('Lỗi khi lưu đội hình: ' . $e->getMessage());
         }
     } else {
-        successResponse('Xem trước đội hình', $result);
+        ob_clean();
+        echo json_encode(['success' => 'Xem trước đội hình', 'data' => $result], JSON_UNESCAPED_UNICODE);
+        exit;
     }
 }
 
@@ -162,10 +201,10 @@ function updateMatchResult($input) {
     $matchId = $input['match_id'] ?? null;
     $teamAScore = $input['team_a_score'] ?? null;
     $teamBScore = $input['team_b_score'] ?? null;
-    $playerStats = $input['player_stats'] ?? []; // [player_id => [goals, assists]]
+    $playerStats = $input['player_stats'] ?? [];
     
     if (!$matchId || $teamAScore === null || $teamBScore === null) {
-        errorResponse('Match ID và tỷ số là bắt buộc');
+        throw new Exception('Match ID và tỷ số là bắt buộc');
     }
     
     // Get match info
@@ -174,15 +213,15 @@ function updateMatchResult($input) {
     $match = $stmt->fetch();
     
     if (!$match) {
-        errorResponse('Trận đấu không tồn tại');
+        throw new Exception('Trận đấu không tồn tại');
     }
     
     if (!canUpdateMatchResult($match['match_date'])) {
-        errorResponse('Chỉ có thể cập nhật kết quả sau 7h sáng ngày hôm sau');
+        throw new Exception('Chỉ có thể cập nhật kết quả sau 7h sáng ngày hôm sau');
     }
     
     if ($match['status'] === 'completed') {
-        errorResponse('Trận đấu đã được cập nhật kết quả rồi');
+        throw new Exception('Trận đấu đã được cập nhật kết quả rồi');
     }
     
     try {
@@ -244,235 +283,24 @@ function updateMatchResult($input) {
             $isWin = ($winningTeam !== null && $participant['team'] === $winningTeam) ? 1 : 0;
             
             // Update match_participants
-            $updateParticipantStmt->execute([
-                $goals, $assists, $points, $participant['id']
-            ]);
+            $updateParticipantStmt->execute([$goals, $assists, $points, $participant['id']]);
             
             // Update players total stats
-            $updatePlayerStmt->execute([
-                $points, $isWin, $goals, $assists, $playerId
-            ]);
+            $updatePlayerStmt->execute([$points, $isWin, $goals, $assists, $playerId]);
         }
         
-        // Update monthly stats
-        updateMonthlyStats($participants, $match['match_date'], $winningTeam, $playerStats);
-        
         $pdo->commit();
-        successResponse('Cập nhật kết quả thành công');
+        
+        ob_clean();
+        echo json_encode(['success' => 'Cập nhật kết quả thành công'], JSON_UNESCAPED_UNICODE);
+        exit;
         
     } catch (Exception $e) {
         $pdo->rollBack();
-        errorResponse('Lỗi khi cập nhật kết quả: ' . $e->getMessage());
+        throw new Exception('Lỗi khi cập nhật kết quả: ' . $e->getMessage());
     }
 }
 
-function updateMonthlyStats($participants, $matchDate, $winningTeam, $playerStats) {
-    global $pdo;
-    
-    $month = date('Y-m', strtotime($matchDate));
-    
-    $stmt = $pdo->prepare("
-        INSERT INTO player_stats (player_id, month, matches_played, wins, goals, assists, points)
-        VALUES (?, ?, 1, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE
-        matches_played = matches_played + 1,
-        wins = wins + VALUES(wins),
-        goals = goals + VALUES(goals),
-        assists = assists + VALUES(assists),
-        points = points + VALUES(points)
-    ");
-    
-    foreach ($participants as $participant) {
-        $playerId = $participant['player_id'];
-        $goals = $playerStats[$playerId]['goals'] ?? 0;
-        $assists = $playerStats[$playerId]['assists'] ?? 0;
-        
-        $points = 0;
-        $isWin = 0;
-        
-        if ($winningTeam === null) {
-            $points = 1; // Draw
-        } elseif ($participant['team'] === $winningTeam) {
-            $points = POINTS_WIN; // Win
-            $isWin = 1;
-        } else {
-            $points = POINTS_LOSE; // Loss
-        }
-        
-        $stmt->execute([$playerId, $month, $isWin, $goals, $assists, $points]);
-    }
-}
-
-function updatePlayerStats($input) {
-    global $pdo;
-    
-    $playerId = $input['player_id'] ?? null;
-    $name = $input['name'] ?? null;
-    $mainPosition = $input['main_position'] ?? null;
-    $secondaryPosition = $input['secondary_position'] ?? null;
-    $mainSkill = $input['main_skill'] ?? null;
-    $secondarySkill = $input['secondary_skill'] ?? null;
-    
-    if (!$playerId) {
-        errorResponse('Player ID is required');
-    }
-    
-    $updateFields = [];
-    $updateValues = [];
-    
-    if ($name) {
-        $updateFields[] = "name = ?";
-        $updateValues[] = $name;
-    }
-    
-    if ($mainPosition) {
-        $updateFields[] = "main_position = ?";
-        $updateValues[] = $mainPosition;
-    }
-    
-    if ($secondaryPosition) {
-        $updateFields[] = "secondary_position = ?";
-        $updateValues[] = $secondaryPosition;
-    }
-    
-    if ($mainSkill) {
-        $updateFields[] = "main_skill = ?";
-        $updateValues[] = $mainSkill;
-    }
-    
-    if ($secondarySkill) {
-        $updateFields[] = "secondary_skill = ?";
-        $updateValues[] = $secondarySkill;
-    }
-    
-    if (empty($updateFields)) {
-        errorResponse('No fields to update');
-    }
-    
-    $updateValues[] = $playerId;
-    
-    $sql = "UPDATE players SET " . implode(', ', $updateFields) . " WHERE id = ?";
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($updateValues);
-    
-    successResponse('Cập nhật thông tin cầu thủ thành công');
-}
-
-// Additional helper functions for API
-function getMatchDetails($matchId) {
-    global $pdo;
-    
-    $stmt = $pdo->prepare("
-        SELECT dm.*, 
-               COUNT(mp.id) as total_players,
-               SUM(CASE WHEN mp.team = 'A' THEN 1 ELSE 0 END) as team_a_count,
-               SUM(CASE WHEN mp.team = 'B' THEN 1 ELSE 0 END) as team_b_count
-        FROM daily_matches dm 
-        LEFT JOIN match_participants mp ON dm.id = mp.match_id
-        WHERE dm.id = ?
-        GROUP BY dm.id
-    ");
-    $stmt->execute([$matchId]);
-    return $stmt->fetch();
-}
-
-function getMatchParticipants($matchId) {
-    global $pdo;
-    
-    $stmt = $pdo->prepare("
-        SELECT mp.*, p.name, p.main_position, p.secondary_position 
-        FROM match_participants mp 
-        JOIN players p ON mp.player_id = p.id 
-        WHERE mp.match_id = ?
-        ORDER BY mp.team, mp.assigned_position, p.name
-    ");
-    $stmt->execute([$matchId]);
-    return $stmt->fetchAll();
-}
-
-// Handle additional API endpoints
-if (isset($_GET['action'])) {
-    $action = $_GET['action'];
-    
-    try {
-        switch ($action) {
-            case 'get_match_details':
-                $matchId = $_GET['match_id'] ?? null;
-                if (!$matchId) {
-                    errorResponse('Match ID is required');
-                }
-                
-                $match = getMatchDetails($matchId);
-                $participants = getMatchParticipants($matchId);
-                
-                successResponse('Match details retrieved', [
-                    'match' => $match,
-                    'participants' => $participants
-                ]);
-                break;
-                
-            case 'get_player_stats':
-                $playerId = $_GET['player_id'] ?? null;
-                $month = $_GET['month'] ?? date('Y-m');
-                
-                if ($playerId) {
-                    $stmt = $pdo->prepare("
-                        SELECT ps.*, p.name 
-                        FROM player_stats ps 
-                        JOIN players p ON ps.player_id = p.id 
-                        WHERE ps.player_id = ? AND ps.month = ?
-                    ");
-                    $stmt->execute([$playerId, $month]);
-                    $stats = $stmt->fetch();
-                } else {
-                    $stmt = $pdo->prepare("
-                        SELECT ps.*, p.name 
-                        FROM player_stats ps 
-                        JOIN players p ON ps.player_id = p.id 
-                        WHERE ps.month = ?
-                        ORDER BY ps.points DESC, ps.wins DESC
-                    ");
-                    $stmt->execute([$month]);
-                    $stats = $stmt->fetchAll();
-                }
-                
-                successResponse('Player stats retrieved', $stats);
-                break;
-                
-            case 'get_leaderboard':
-                $period = $_GET['period'] ?? 'month'; // month, all_time
-                $month = $_GET['month'] ?? date('Y-m');
-                
-                if ($period === 'month') {
-                    $stmt = $pdo->prepare("
-                        SELECT ps.*, p.name, p.main_position
-                        FROM player_stats ps 
-                        JOIN players p ON ps.player_id = p.id 
-                        WHERE ps.month = ? AND ps.matches_played > 0
-                        ORDER BY ps.points DESC, ps.wins DESC, ps.goals DESC
-                        LIMIT 20
-                    ");
-                    $stmt->execute([$month]);
-                } else {
-                    $stmt = $pdo->query("
-                        SELECT p.*, 
-                               ROUND(p.total_points / GREATEST(p.total_matches, 1), 2) as avg_points
-                        FROM players p 
-                        WHERE p.total_matches > 0
-                        ORDER BY p.total_points DESC, p.total_wins DESC, p.total_goals DESC
-                        LIMIT 20
-                    ");
-                }
-                
-                $leaderboard = $stmt->fetchAll();
-                successResponse('Leaderboard retrieved', $leaderboard);
-                break;
-                
-            default:
-                errorResponse('Invalid GET action');
-        }
-    } catch (Exception $e) {
-        errorResponse($e->getMessage());
-    }
-}
+// Clean any remaining output
+ob_end_clean();
 ?>
