@@ -231,6 +231,11 @@ $recentMatches = $stmt->fetchAll();
                             <i class="fas fa-users"></i> Quản lý cầu thủ
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="history.php">
+                            <i class="fas fa-history"></i> Lịch sử trận đấu
+                        </a>
+                    </li>
                 </ul>
                 
                 <ul class="navbar-nav">

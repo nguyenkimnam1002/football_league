@@ -79,6 +79,14 @@ try {
         case 'update_status':
             updateStatus($input);
             break;
+
+        case 'get_match_formation':
+            getMatchFormation($input);
+            break;
+            
+        case 'get_match_stats':
+            getMatchStats($input);
+            break;
             
         default:
             ob_clean();
@@ -598,6 +606,175 @@ function updateStatus($input) {
         $pdo->rollBack();
         throw new Exception('Lỗi khi cập nhật: ' . $e->getMessage());
     }
+}
+
+function getMatchFormation($input) {
+    global $pdo;
+    
+    $matchId = $input['match_id'] ?? null;
+    
+    if (!$matchId) {
+        throw new Exception('Match ID là bắt buộc');
+    }
+    
+    // Get match info
+    $stmt = $pdo->prepare("SELECT * FROM daily_matches WHERE id = ?");
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    
+    if (!$match) {
+        throw new Exception('Trận đấu không tồn tại');
+    }
+    
+    // Get participants with player info
+    $stmt = $pdo->prepare("
+        SELECT mp.*, p.name, p.main_position, p.secondary_position, p.main_skill, p.secondary_skill
+        FROM match_participants mp 
+        JOIN players p ON mp.player_id = p.id 
+        WHERE mp.match_id = ?
+        ORDER BY mp.team, mp.assigned_position, p.name
+    ");
+    $stmt->execute([$matchId]);
+    $participants = $stmt->fetchAll();
+    
+    // Group by team and position
+    $teamA = [];
+    $teamB = [];
+    $positions = ['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'];
+    
+    // Initialize positions
+    foreach ($positions as $pos) {
+        $teamA[$pos] = [];
+        $teamB[$pos] = [];
+    }
+    
+    foreach ($participants as $participant) {
+        $playerData = [
+            'id' => $participant['player_id'],
+            'name' => $participant['name'],
+            'main_position' => $participant['main_position'],
+            'secondary_position' => $participant['secondary_position'],
+            'main_skill' => $participant['main_skill'],
+            'secondary_skill' => $participant['secondary_skill'],
+            'assigned_position' => $participant['assigned_position'],
+            'position_type' => $participant['position_type'],
+            'skill_level' => $participant['skill_level'],
+            'goals' => $participant['goals'],
+            'assists' => $participant['assists'],
+            'points_earned' => $participant['points_earned']
+        ];
+        
+        if ($participant['team'] === 'A') {
+            $teamA[$participant['assigned_position']][] = $playerData;
+        } else {
+            $teamB[$participant['assigned_position']][] = $playerData;
+        }
+    }
+    
+    $responseData = [
+        'match' => $match,
+        'teamA' => $teamA,
+        'teamB' => $teamB
+    ];
+    
+    ob_clean();
+    echo json_encode(['success' => 'Tải đội hình thành công', 'data' => $responseData], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getMatchStats($input) {
+    global $pdo;
+    
+    $matchId = $input['match_id'] ?? null;
+    
+    if (!$matchId) {
+        throw new Exception('Match ID là bắt buộc');
+    }
+    
+    // Get match info
+    $stmt = $pdo->prepare("SELECT * FROM daily_matches WHERE id = ?");
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    
+    if (!$match) {
+        throw new Exception('Trận đấu không tồn tại');
+    }
+    
+    if ($match['status'] !== 'completed') {
+        throw new Exception('Chỉ có thể xem thống kê của trận đấu đã hoàn thành');
+    }
+    
+    // Get team statistics
+    $stmt = $pdo->prepare("
+        SELECT 
+            team,
+            COUNT(*) as players,
+            SUM(goals) as goals,
+            SUM(assists) as assists,
+            SUM(points_earned) as total_points
+        FROM match_participants 
+        WHERE match_id = ?
+        GROUP BY team
+    ");
+    $stmt->execute([$matchId]);
+    $teamStatsRaw = $stmt->fetchAll();
+    
+    $teamStats = [
+        'teamA' => ['players' => 0, 'goals' => 0, 'assists' => 0, 'total_points' => 0],
+        'teamB' => ['players' => 0, 'goals' => 0, 'assists' => 0, 'total_points' => 0]
+    ];
+    
+    foreach ($teamStatsRaw as $stat) {
+        $teamKey = $stat['team'] === 'A' ? 'teamA' : 'teamB';
+        $teamStats[$teamKey] = [
+            'players' => $stat['players'],
+            'goals' => $stat['goals'],
+            'assists' => $stat['assists'],
+            'total_points' => $stat['total_points']
+        ];
+    }
+    
+    // Get top performers
+    $stmt = $pdo->prepare("
+        SELECT mp.*, p.name
+        FROM match_participants mp 
+        JOIN players p ON mp.player_id = p.id 
+        WHERE mp.match_id = ?
+        ORDER BY mp.goals DESC, mp.assists DESC, mp.points_earned DESC
+        LIMIT 10
+    ");
+    $stmt->execute([$matchId]);
+    $allPerformers = $stmt->fetchAll();
+    
+    $topPerformers = [
+        'topScorer' => null,
+        'topAssist' => null,
+        'mvp' => null
+    ];
+    
+    // Find top scorer
+    foreach ($allPerformers as $performer) {
+        if ($performer['goals'] > 0 && !$topPerformers['topScorer']) {
+            $topPerformers['topScorer'] = $performer;
+        }
+        if ($performer['assists'] > 0 && !$topPerformers['topAssist']) {
+            $topPerformers['topAssist'] = $performer;
+        }
+        if ($performer['points_earned'] > 0 && !$topPerformers['mvp']) {
+            $topPerformers['mvp'] = $performer;
+        }
+    }
+    
+    $responseData = [
+        'match' => $match,
+        'teamStats' => $teamStats,
+        'topPerformers' => $topPerformers,
+        'allPerformers' => $allPerformers
+    ];
+    
+    ob_clean();
+    echo json_encode(['success' => 'Tải thống kê thành công', 'data' => $responseData], JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
 // Clean any remaining output
