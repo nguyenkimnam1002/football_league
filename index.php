@@ -1,44 +1,117 @@
 <?php
 require_once 'config.php';
 
-// Get current match info
 $pdo = DB::getInstance();
-$currentDate = getCurrentDate();
-$isLocked = isRegistrationLocked();
 
-// Get today's registrations
-$stmt = $pdo->prepare("
-    SELECT p.*, dr.registered_at 
-    FROM players p 
-    JOIN daily_registrations dr ON p.id = dr.player_id 
-    WHERE dr.registration_date = ?
-    ORDER BY dr.registered_at ASC
-");
-$stmt->execute([$currentDate]);
-$registeredPlayers = $stmt->fetchAll();
-
-// Get today's match if exists
-$stmt = $pdo->prepare("SELECT * FROM daily_matches WHERE match_date = ?");
-$stmt->execute([$currentDate]);
-$todayMatch = $stmt->fetch();
-
-// Get recent matches for history
+// Get latest match
 $stmt = $pdo->prepare("
     SELECT dm.*, 
            COUNT(mp.id) as total_players
     FROM daily_matches dm 
     LEFT JOIN match_participants mp ON dm.id = mp.match_id
-    WHERE dm.match_date < ?
     GROUP BY dm.id
     ORDER BY dm.match_date DESC 
-    LIMIT 5
+    LIMIT 1
 ");
-$stmt->execute([$currentDate]);
+$latestMatch = $stmt->fetch();
+
+// Get total statistics
+$currentYear = date('Y');
+
+// Basic stats
+$stmt = $pdo->query("
+    SELECT 
+        COUNT(*) as total_players,
+        SUM(total_goals) as total_goals,
+        SUM(total_assists) as total_assists,
+        COUNT(CASE WHEN total_matches > 0 THEN 1 END) as active_players
+    FROM players
+");
+$basicStats = $stmt->fetch();
+
+// Matches this year
+$stmt = $pdo->prepare("
+    SELECT COUNT(*) as matches_this_year
+    FROM daily_matches 
+    WHERE YEAR(match_date) = ? AND status = 'completed'
+");
+$stmt->execute([$currentYear]);
+$yearMatches = $stmt->fetchColumn();
+
+// Most goals in a single match
+$stmt = $pdo->query("
+    SELECT MAX(goals) as highest_goals
+    FROM match_participants
+    WHERE goals > 0
+");
+$highestGoals = $stmt->fetchColumn() ?: 0;
+
+// Most active player (most matches this year)
+$stmt = $pdo->prepare("
+    SELECT p.name, COUNT(mp.id) as matches_count
+    FROM players p
+    JOIN match_participants mp ON p.id = mp.player_id
+    JOIN daily_matches dm ON mp.match_id = dm.id
+    WHERE YEAR(dm.match_date) = ? AND dm.status = 'completed'
+    GROUP BY p.id, p.name
+    ORDER BY matches_count DESC, p.name
+    LIMIT 1
+");
+$stmt->execute([$currentYear]);
+$mostActivePlayer = $stmt->fetch();
+
+// Average goals per match this year
+$stmt = $pdo->prepare("
+    SELECT 
+        COALESCE(AVG(team_a_score + team_b_score), 0) as avg_goals_per_match
+    FROM daily_matches 
+    WHERE YEAR(match_date) = ? AND status = 'completed'
+");
+$stmt->execute([$currentYear]);
+$avgGoalsPerMatch = $stmt->fetchColumn();
+
+$clubStats = [
+    'total_players' => $basicStats['total_players'],
+    'matches_this_year' => $yearMatches,
+    'total_goals' => $basicStats['total_goals'],
+    'total_assists' => $basicStats['total_assists'],
+    'highest_goals' => $highestGoals,
+    'most_active_player' => $mostActivePlayer ? $mostActivePlayer['name'] : 'Chưa có',
+    'most_active_matches' => $mostActivePlayer ? $mostActivePlayer['matches_count'] : 0,
+    'avg_goals_per_match' => round($avgGoalsPerMatch, 1)
+];
+
+// Get recent completed matches
+$stmt = $pdo->prepare("
+    SELECT dm.*, 
+           COUNT(mp.id) as total_players
+    FROM daily_matches dm 
+    LEFT JOIN match_participants mp ON dm.id = mp.match_id
+    WHERE dm.status = 'completed'
+    GROUP BY dm.id
+    ORDER BY dm.match_date DESC 
+    LIMIT 3
+");
 $recentMatches = $stmt->fetchAll();
 
-// Get all players for selection
-$stmt = $pdo->query("SELECT * FROM players ORDER BY name");
-$allPlayers = $stmt->fetchAll();
+// Get top players
+$stmt = $pdo->query("
+    SELECT name, total_points, total_goals, total_matches, main_position
+    FROM players 
+    WHERE total_matches > 0
+    ORDER BY total_points DESC, total_goals DESC
+    LIMIT 6
+");
+$topPlayers = $stmt->fetchAll();
+
+// Check today's registration
+$currentDate = getCurrentDate();
+$stmt = $pdo->prepare("
+    SELECT COUNT(*) FROM daily_registrations 
+    WHERE registration_date = ?
+");
+$stmt->execute([$currentDate]);
+$todayRegistrations = $stmt->fetchColumn();
 ?>
 
 <!DOCTYPE html>
@@ -46,7 +119,7 @@ $allPlayers = $stmt->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>⚽ Football League Manager</title>
+    <title>⚽ FC Gà Gáy - Football League</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
@@ -58,157 +131,193 @@ $allPlayers = $stmt->fetchAll();
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
         }
-        .player-card {
-            border: 2px solid #e9ecef;
-            border-radius: 10px;
-            transition: all 0.3s;
-            cursor: pointer;
-            min-height: 100px;
-        }
-        .player-card:hover {
-            border-color: #28a745;
-            transform: translateY(-2px);
-        }
-        .player-card.selected {
-            border-color: #28a745;
-            background-color: #f8fff9;
-        }
-        .skill-badge {
-            font-size: 0.75em;
-            padding: 2px 8px;
-            border-radius: 12px;
-        }
-        .position-header {
-            color: #28a745;
-            font-weight: bold;
-            border-bottom: 2px solid #28a745;
-            padding-bottom: 5px;
-            margin-bottom: 15px;
-        }
-        .team-formation {
-            background: #f8f9fa;
+        .stats-card {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
             border-radius: 15px;
             padding: 20px;
-            max-height: 600px;
-            overflow-y: auto;
+            text-align: center;
+            margin-bottom: 20px;
+            transition: transform 0.3s ease;
         }
-        .team-a { border-left: 4px solid #dc3545; }
-        .team-b { border-left: 4px solid #007bff; }
-        .status-locked {
-            background: linear-gradient(45deg, #f44336, #d32f2f);
+        .stats-card:hover {
+            transform: translateY(-5px);
         }
-        .status-open {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
+        .team-photo-container {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .team-photo {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        .hero-section {
+            padding: 40px 0;
+        }
+        .club-title {
+            color: white;
+            font-size: 3rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            margin-bottom: 20px;
+        }
+        .club-subtitle {
+            color: #e3f2fd;
+            font-size: 1.3rem;
+            margin-bottom: 30px;
+        }
+        .quick-actions {
+            margin-top: 30px;
+        }
+        .btn-primary-custom {
+            background: linear-gradient(45deg, #ff6b35, #f7931e);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        .btn-primary-custom:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 53, 0.4);
+            color: white;
+        }
+        .btn-outline-custom {
+            border: 2px solid white;
+            color: white;
+            background: transparent;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+        .btn-outline-custom:hover {
+            background: white;
+            color: #667eea;
+            transform: translateY(-2px);
+        }
+        .recent-match-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+        }
+        .recent-match-card:hover {
+            transform: translateY(-3px);
+        }
+        .match-score {
+            font-size: 1.5rem;
+            font-weight: bold;
+            text-align: center;
+        }
+        .team-score-a { color: #dc3545; }
+        .team-score-b { color: #007bff; }
+        .player-item {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 10px;
+            color: white;
+            transition: background 0.3s ease;
+        }
+        .player-item:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .player-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #ff6b35, #f7931e);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            margin-right: 15px;
         }
         .navbar-brand {
             font-weight: bold;
-            font-size: 1.5rem;
         }
         .nav-link {
             font-weight: 500;
-            transition: all 0.3s ease;
         }
-        .nav-link:hover {
-            transform: translateY(-1px);
-        }
-        .quick-access-btn {
-            transition: all 0.3s ease;
-            margin-bottom: 8px;
-        }
-        .quick-access-btn:hover {
-            transform: translateX(5px);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-        }
-        .player-select-card {
-            transition: all 0.3s ease;
-            cursor: pointer;
-            min-height: 80px;
+        .gallery-item {
             position: relative;
-        }
-        .player-select-card:hover {
-            background-color: #f8f9fa;
-            border-color: #28a745 !important;
-        }
-        .form-check-input:checked ~ .form-check-label .player-select-card {
-            background-color: #e8f5e8;
-            border-color: #28a745 !important;
-            box-shadow: 0 2px 8px rgba(40, 167, 69, 0.3);
-        }
-        .form-check {
-            margin-bottom: 0;
-        }
-        .form-check-label {
-            cursor: pointer;
-            width: 100%;
-        }
-        #selectedCount {
-            font-weight: bold;
-            color: #fff;
-        }
-        .players-grid {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #dee2e6;
+            overflow: hidden;
             border-radius: 10px;
-            padding: 15px;
-            background: white;
-        }
-        .position-group {
-            margin-bottom: 20px;
-        }
-        .position-title {
-            background: #f8f9fa;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-weight: bold;
-            color: #495057;
-            border-left: 4px solid #28a745;
-            margin-bottom: 10px;
-        }
-        .registered-players {
-            max-height: 500px;
-            overflow-y: auto;
-        }
-        .player-compact {
-            background: white;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 8px 12px;
-            margin-bottom: 6px;
-            display: flex;
-            justify-content: between;
-            align-items: center;
+            cursor: pointer;
             transition: all 0.3s ease;
+            background: #f8f9fa;
         }
-        .player-compact:hover {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            border-color: #28a745;
+        .gallery-item:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
         }
-        .formation-display {
-            max-height: 700px;
-            overflow-y: auto;
+        .gallery-img {
+            width: 100%;
+            height: 120px;
+            object-fit: cover;
+            transition: transform 0.3s ease;
         }
-        .position-players {
-            min-height: 50px;
-            border: 1px dashed #dee2e6;
-            border-radius: 6px;
-            padding: 8px;
-            margin-bottom: 10px;
+        .gallery-item:hover .gallery-img {
+            transform: scale(1.1);
         }
-        .position-players:not(:empty) {
-            border-color: #28a745;
-            background-color: #f8fff9;
+        .gallery-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            color: white;
+            font-size: 1.5rem;
+        }
+        .gallery-item:hover .gallery-overlay {
+            opacity: 1;
+        }
+        .modal-body img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 10px;
+        }
+        /* Quick Actions Section */
+        .quick-actions-section {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            border-radius: 15px;
+            padding: 30px;
+            margin-top: 20px;
         }
         @media (max-width: 768px) {
-            .players-grid {
-                max-height: 300px;
+            .club-title {
+                font-size: 2.2rem;
             }
-            .btn-group .btn {
-                font-size: 0.85rem;
-                padding: 0.5rem;
+            .club-subtitle {
+                font-size: 1.1rem;
             }
-            .player-select-card {
-                min-height: 70px;
+            .btn-primary-custom, .btn-outline-custom {
+                display: block;
+                width: 100%;
+                max-width: 250px;
+                margin: 10px auto;
+            }
+            .gallery-img {
+                height: 100px;
             }
         }
     </style>
@@ -229,6 +338,11 @@ $allPlayers = $stmt->fetchAll();
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
                         <a class="nav-link active" href="index.php">
+                            <i class="fas fa-home"></i> Trang chủ
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="register.php">
                             <i class="fas fa-user-plus"></i> Đăng ký
                         </a>
                     </li>
@@ -249,7 +363,7 @@ $allPlayers = $stmt->fetchAll();
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="history.php">
-                            <i class="fas fa-history"></i> Lịch sử trận đấu
+                            <i class="fas fa-history"></i> Lịch sử
                         </a>
                     </li>
                 </ul>
@@ -272,341 +386,407 @@ $allPlayers = $stmt->fetchAll();
         </div>
     </nav>
 
-    <div class="container-fluid py-4">
-        <!-- Header -->
-        <div class="card card-custom mb-4">
-            <div class="card-body text-center">
-                <h1 class="mb-3">⚽ Football League Manager</h1>
-                <p class="lead">Đăng ký và chia đội tự động hàng ngày</p>
-                
-                <!-- Status Bar -->
-                <div class="alert status-open text-white">
-                    <i class="fas fa-clock me-2"></i>
-                    <strong>Ngày <?= date('d/m/Y', strtotime($currentDate)) ?></strong> - 
-                    ✅ Luôn mở đăng ký (không giới hạn thời gian)
-                    - Đã đăng ký: <strong id="registeredCount"><?= count($registeredPlayers) ?></strong> người
+    <div class="container py-4">
+        <!-- Hero Section -->
+        <div class="hero-section text-center">
+            <h1 class="club-title">⚽ FC Gà Gáy</h1>
+            <p class="club-subtitle">Giao Hữu Nội Bộ - Đam Mê Bóng Đá</p>
+            
+            <div class="row justify-content-center">
+                <div class="col-lg-6">
+                    <div class="team-photo-container">
+                        <img src="images/team-main.jpg" 
+                             alt="Đội bóng FC Gà Gáy" 
+                             class="team-photo"
+                             onerror="this.src='data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 600 400\'><rect width=\'600\' height=\'400\' fill=\'%23f8f9fa\'/><text x=\'300\' y=\'180\' text-anchor=\'middle\' font-size=\'18\' fill=\'%236c757d\'>Ảnh đội bóng FC Gà Gáy</text><text x=\'300\' y=\'220\' text-anchor=\'middle\' font-size=\'14\' fill=\'%236c757d\'>Giao Hữu Nội Bộ</text><rect x=\'20\' y=\'20\' width=\'560\' height=\'360\' fill=\'none\' stroke=\'%23dee2e6\' stroke-width=\'2\' rx=\'10\'/></svg>'">
+                        <div class="mt-3">
+                            <small class="text-muted">
+                                <i class="fas fa-users me-1"></i>
+                                <?= $clubStats['total_players'] ?> cầu thủ |
+                                <i class="fas fa-calendar me-1"></i>
+                                <?= $clubStats['matches_this_year'] ?> trận năm <?= $currentYear ?>
+                            </small>
+                        </div>
+                    </div>
                 </div>
             </div>
+            
+            <div class="quick-actions">
+                <a href="register.php" class="btn btn-primary-custom btn-lg">
+                    <i class="fas fa-user-plus me-2"></i>Đăng ký thi đấu
+                </a>
+                <a href="leaderboard.php" class="btn btn-outline-custom btn-lg">
+                    <i class="fas fa-trophy me-2"></i>Xem bảng xếp hạng
+                </a>
+            </div>
+            
+            <?php if ($todayRegistrations > 0): ?>
+                <div class="alert alert-success mt-4 d-inline-block">
+                    <i class="fas fa-users"></i>
+                    Hôm nay đã có <strong><?= $todayRegistrations ?></strong> người đăng ký
+                </div>
+            <?php endif; ?>
         </div>
 
         <div class="row">
-            <!-- Left Column: Player Selection & Registered Players -->
+            <!-- Left Column: Stats & Latest Match -->
             <div class="col-lg-4">
-                <!-- Player Selection -->
+                <!-- Statistics -->
                 <div class="card card-custom mb-4">
                     <div class="card-header">
                         <h5 class="mb-0">
-                            <i class="fas fa-user-plus me-2"></i>
-                            Chọn cầu thủ tham gia
+                            <i class="fas fa-chart-bar me-2"></i>Thống kê câu lạc bộ
                         </h5>
                     </div>
-                    <div class="card-body">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="mb-0">Danh sách cầu thủ:</h6>
-                            <div>
-                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="selectAll()">
-                                    <i class="fas fa-check-square"></i> Chọn tất cả
-                                </button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="unselectAll()">
-                                    <i class="fas fa-square"></i> Bỏ chọn
-                                </button>
+                    <div class="card-body p-0">
+                        <div class="row g-0">
+                            <div class="col-6">
+                                <div class="stats-card">
+                                    <div class="h3"><?= $clubStats['total_players'] ?></div>
+                                    <small>Tổng cầu thủ</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stats-card">
+                                    <div class="h3"><?= $clubStats['matches_this_year'] ?></div>
+                                    <small>Trận năm <?= $currentYear ?></small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stats-card">
+                                    <div class="h3"><?= $clubStats['total_goals'] ?></div>
+                                    <small>Tổng bàn thắng</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stats-card">
+                                    <div class="h3"><?= $clubStats['avg_goals_per_match'] ?></div>
+                                    <small>TB bàn/trận</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stats-card">
+                                    <div class="h3"><?= $clubStats['highest_goals'] ?></div>
+                                    <small>Nhiều bàn nhất</small>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="stats-card">
+                                    <div class="h3"><?= $clubStats['total_assists'] ?></div>
+                                    <small>Tổng kiến tạo</small>
+                                </div>
                             </div>
                         </div>
-
-                        <!-- Players Grid -->
-                        <div class="players-grid">
-                            <?php
-                            // Group unregistered players by position for display
-                            $unregisteredPlayers = [];
-                            foreach ($allPlayers as $player) {
-                                $isRegistered = array_filter($registeredPlayers, function($rp) use ($player) {
-                                    return $rp['id'] == $player['id'];
-                                });
-                                if (!$isRegistered) {
-                                    $unregisteredPlayers[$player['main_position']][] = $player;
-                                }
-                            }
-                            ?>
-
-                            <?php foreach (['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'] as $position): ?>
-                                <?php if (isset($unregisteredPlayers[$position])): ?>
-                                    <div class="position-group">
-                                        <div class="position-title">
-                                            <?= formatPosition($position) ?> (<?= count($unregisteredPlayers[$position]) ?> người)
-                                        </div>
-                                        <div class="row g-2">
-                                            <?php foreach ($unregisteredPlayers[$position] as $player): ?>
-                                                <div class="col-12">
-                                                    <div class="form-check">
-                                                        <input class="form-check-input player-checkbox" 
-                                                               type="checkbox" 
-                                                               value="<?= $player['id'] ?>" 
-                                                               id="player_<?= $player['id'] ?>">
-                                                        <label class="form-check-label" for="player_<?= $player['id'] ?>">
-                                                            <div class="player-select-card p-2 border rounded d-flex justify-content-between align-items-center">
-                                                                <div>
-                                                                    <div class="fw-bold"><?= htmlspecialchars($player['name']) ?></div>
-                                                                    <div class="small text-muted">
-                                                                        <?= $player['secondary_position'] ? formatPosition($player['secondary_position']) : 'Không có vị trí phụ' ?>
-                                                                    </div>
-                                                                </div>
-                                                                <div>
-                                                                    <?php $skill = formatSkill($player['main_skill']); ?>
-                                                                    <span class="badge bg-<?= $skill['color'] ?> skill-badge">
-                                                                        <?= $skill['text'] ?>
-                                                                    </span>
-                                                                </div>
-                                                            </div>
-                                                        </label>
-                                                    </div>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
+                        
+                        <!-- Most Active Player -->
+                        <?php if ($clubStats['most_active_player'] !== 'Chưa có'): ?>
+                            <div class="alert alert-info mx-3 mb-3">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-fire text-warning fa-2x me-3"></i>
+                                    <div>
+                                        <strong>Cầu thủ tích cực nhất năm <?= $currentYear ?>:</strong><br>
+                                        <span class="text-primary fw-bold"><?= htmlspecialchars($clubStats['most_active_player']) ?></span>
+                                        <span class="badge bg-success ms-2"><?= $clubStats['most_active_matches'] ?> trận</span>
                                     </div>
-                                <?php endif; ?>
-                            <?php endforeach; ?>
-                        </div>
-
-                        <!-- Registration Actions -->
-                        <div class="text-center mt-3">
-                            <button type="button" id="registerSelectedBtn" class="btn btn-success btn-lg w-100" disabled>
-                                <i class="fas fa-user-plus"></i> Đăng ký cầu thủ đã chọn (<span id="selectedCount">0</span>)
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Registered Players -->
-                <div class="card card-custom mb-4">
-                    <div class="card-header">
-                        <h5 class="mb-0">
-                            <i class="fas fa-users me-2"></i>
-                            Cầu thủ đã đăng ký (<span id="totalRegistered"><?= count($registeredPlayers) ?></span>)
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="registered-players">
-                            <?php
-                            $playersByPosition = [];
-                            foreach ($registeredPlayers as $player) {
-                                $playersByPosition[$player['main_position']][] = $player;
-                            }
-                            ?>
-
-                            <?php foreach (['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'] as $position): ?>
-                                <?php if (isset($playersByPosition[$position])): ?>
-                                    <div class="position-group">
-                                        <div class="position-title">
-                                            <?= formatPosition($position) ?> (<?= count($playersByPosition[$position]) ?>)
-                                        </div>
-                                        <div class="position-players" data-position="<?= $position ?>">
-                                            <?php foreach ($playersByPosition[$position] as $player): ?>
-                                                <div class="player-compact" data-player-id="<?= $player['id'] ?>">
-                                                    <div class="flex-grow-1">
-                                                        <strong><?= htmlspecialchars($player['name']) ?></strong>
-                                                        <div class="small text-muted d-flex gap-1 mt-1">
-                                                            <?php $skill = formatSkill($player['main_skill']); ?>
-                                                            <span class="badge bg-<?= $skill['color'] ?> skill-badge">
-                                                                <?= $skill['text'] ?>
-                                                            </span>
-                                                            <?php if ($player['secondary_skill']): ?>
-                                                                <?php $secSkill = formatSkill($player['secondary_skill']); ?>
-                                                                <span class="badge bg-<?= $secSkill['color'] ?> skill-badge">
-                                                                    <?= $secSkill['text'] ?>
-                                                                </span>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                    </div>
-                                                    <button class="btn btn-sm btn-outline-danger remove-player" 
-                                                            data-player-id="<?= $player['id'] ?>"
-                                                            title="Hủy đăng ký">
-                                                        <i class="fas fa-times"></i>
-                                                    </button>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    </div>
-                                <?php endif; ?>
-                            <?php endforeach; ?>
-                        </div>
-
-                        <!-- Team Division Actions -->
-                        <?php if (count($registeredPlayers) >= MIN_PLAYERS): ?>
-                            <div class="text-center mt-4">
-                                <button id="divideTeamsBtn" class="btn btn-success btn-lg w-100 mb-2">
-                                    <i class="fas fa-random"></i> Chia đội tự động
-                                </button>
-                                <button id="previewBtn" class="btn btn-outline-success btn-lg w-100">
-                                    <i class="fas fa-eye"></i> Xem trước
-                                </button>
-                            </div>
-                        <?php else: ?>
-                            <div class="alert alert-warning text-center">
-                                <i class="fas fa-users"></i>
-                                Cần thêm <?= MIN_PLAYERS - count($registeredPlayers) ?> cầu thủ nữa để có thể chia đội
+                                </div>
                             </div>
                         <?php endif; ?>
                     </div>
                 </div>
-            </div>
 
-            <!-- Middle Column: Formation Display -->
-            <div class="col-lg-4">
-                <!-- Today's Match Formation -->
-                <?php if ($todayMatch): ?>
+                <!-- Latest Match -->
+                <?php if ($latestMatch): ?>
                     <div class="card card-custom mb-4">
                         <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-trophy me-2"></i>
-                                Đội hình hôm nay
-                            </h5>
+                            <h6 class="mb-0">
+                                <i class="fas fa-calendar-day me-2"></i>Trận đấu gần nhất
+                            </h6>
                         </div>
                         <div class="card-body">
-                            <?php if ($todayMatch['status'] === 'completed'): ?>
-                                <div class="alert alert-success">
-                                    <h6>🎉 Kết quả trận đấu:</h6>
-                                    <div class="row text-center">
-                                        <div class="col-4">
-                                            <strong>Đội A</strong><br>
-                                            <span class="h3"><?= $todayMatch['team_a_score'] ?></span>
-                                        </div>
-                                        <div class="col-4">
-                                            <span class="h5">VS</span>
-                                        </div>
-                                        <div class="col-4">
-                                            <strong>Đội B</strong><br>
-                                            <span class="h3"><?= $todayMatch['team_b_score'] ?></span>
-                                        </div>
+                            <div class="text-center mb-3">
+                                <h6><?= date('d/m/Y', strtotime($latestMatch['match_date'])) ?></h6>
+                                <?php if ($latestMatch['status'] === 'completed'): ?>
+                                    <div class="match-score mb-2">
+                                        <span class="team-score-a"><?= $latestMatch['team_a_score'] ?></span>
+                                        <span class="text-muted mx-2">-</span>
+                                        <span class="team-score-b"><?= $latestMatch['team_b_score'] ?></span>
                                     </div>
-                                </div>
-                            <?php elseif ($todayMatch['status'] === 'scheduled'): ?>
-                                <div class="alert alert-info">
-                                    <i class="fas fa-users"></i> Đội hình đã được tạo. Vẫn có thể đăng ký thêm cầu thủ.
-                                </div>
-                            <?php endif; ?>
-                            
-                            <div class="formation-display" id="todayFormation"></div>
-                        </div>
-                    </div>
-                <?php else: ?>
-                    <div class="card card-custom mb-4">
-                        <div class="card-header">
-                            <h5 class="mb-0">
-                                <i class="fas fa-futbol me-2"></i>
-                                Đội hình dự kiến
-                            </h5>
-                        </div>
-                        <div class="card-body text-center">
-                            <div class="py-5">
-                                <i class="fas fa-users fa-3x text-muted mb-3"></i>
-                                <h6 class="text-muted">Chưa có đội hình</h6>
-                                <p class="text-muted small">Đăng ký đủ <?= MIN_PLAYERS ?> cầu thủ và click "Chia đội tự động" để tạo đội hình</p>
+                                    <small class="text-muted">
+                                        <?php
+                                        $winner = $latestMatch['team_a_score'] > $latestMatch['team_b_score'] ? 'Đội A thắng' : 
+                                                 ($latestMatch['team_b_score'] > $latestMatch['team_a_score'] ? 'Đội B thắng' : 'Hòa');
+                                        echo $winner;
+                                        ?>
+                                    </small>
+                                <?php else: ?>
+                                    <div class="text-muted">
+                                        <i class="fas fa-clock"></i> 
+                                        <?= $latestMatch['status'] === 'scheduled' ? 'Đã lên lịch' : 'Chưa hoàn thành' ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                            <div class="text-center">
+                                <span class="badge bg-primary">
+                                    <?= $latestMatch['total_players'] ?> cầu thủ tham gia
+                                </span>
+                            </div>
+                            <div class="text-center mt-3">
+                                <a href="match_result.php?id=<?= $latestMatch['id'] ?>" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-eye"></i> Chi tiết
+                                </a>
                             </div>
                         </div>
                     </div>
                 <?php endif; ?>
             </div>
 
-            <!-- Right Column: Quick Access & Stats -->
+            <!-- Middle Column: Recent Matches -->
             <div class="col-lg-4">
-
-                <!-- Quick Access Panel -->
                 <div class="card card-custom mb-4">
                     <div class="card-header">
-                        <h6 class="mb-0">
-                            <i class="fas fa-bolt me-2"></i>
-                            Truy cập nhanh
-                        </h6>
+                        <h5 class="mb-0">
+                            <i class="fas fa-history me-2"></i>Kết quả gần đây
+                        </h5>
                     </div>
                     <div class="card-body">
-                        <div class="d-grid gap-2">
-                            <a href="match_result.php" class="btn btn-warning quick-access-btn">
-                                <i class="fas fa-edit me-2"></i> Nhập kết quả trận đấu
-                            </a>
-                            <a href="leaderboard.php" class="btn btn-success quick-access-btn">
-                                <i class="fas fa-trophy me-2"></i> Xem bảng xếp hạng
-                            </a>
-                            <a href="players.php" class="btn btn-info quick-access-btn">
-                                <i class="fas fa-users me-2"></i> Quản lý cầu thủ
-                            </a>
-                            <a href="history.php" class="btn btn-secondary quick-access-btn">
-                                <i class="fas fa-history me-2"></i> Lịch sử trận đấu
-                            </a>
-                        </div>
-                        
-                        <!-- Quick Stats -->
-                        <hr class="my-3">
-                        <div class="small text-muted">
-                            <div class="d-flex justify-content-between mb-1">
-                                <span>Hôm nay:</span>
-                                <span class="fw-bold"><span id="currentTotal"><?= count($registeredPlayers) ?></span> người</span>
-                            </div>
-                            <div class="d-flex justify-content-between mb-1">
-                                <span>Trạng thái:</span>
-                                <span class="text-success fw-bold">Luôn mở</span>
-                            </div>
-                            <?php if ($todayMatch): ?>
-                                <div class="d-flex justify-content-between">
-                                    <span>Đội hình:</span>
-                                    <span class="text-info fw-bold">
-                                        <?= $todayMatch['status'] === 'completed' ? 'Đã hoàn thành' : 'Đã tạo' ?>
-                                    </span>
+                        <?php if (!empty($recentMatches)): ?>
+                            <?php foreach ($recentMatches as $match): ?>
+                                <div class="recent-match-card">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <strong><?= date('d/m', strtotime($match['match_date'])) ?></strong>
+                                        <span class="badge bg-success">Hoàn thành</span>
+                                    </div>
+                                    <div class="match-score mb-2">
+                                        <span class="team-score-a"><?= $match['team_a_score'] ?></span>
+                                        <span class="text-muted mx-2">-</span>
+                                        <span class="team-score-b"><?= $match['team_b_score'] ?></span>
+                                    </div>
+                                    <div class="text-center">
+                                        <small class="text-muted">
+                                            <?= $match['total_players'] ?> cầu thủ tham gia
+                                        </small>
+                                    </div>
                                 </div>
-                            <?php endif; ?>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="text-center text-muted py-4">
+                                <i class="fas fa-calendar-times fa-2x mb-2"></i>
+                                <p>Chưa có trận đấu nào hoàn thành</p>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <div class="text-center mt-3">
+                            <a href="history.php" class="btn btn-outline-primary">
+                                <i class="fas fa-list"></i> Xem tất cả
+                            </a>
                         </div>
                     </div>
                 </div>
+            </div>
 
-                <!-- Recent Matches -->
-                <div class="card card-custom">
-                    <div class="card-header">
-                        <h6 class="mb-0">
-                            <i class="fas fa-history me-2"></i>
-                            Lịch sử gần đây
-                        </h6>
+            <!-- Right Column: Top Players -->
+            <div class="col-lg-4">
+                <div class="card card-custom" style="background: linear-gradient(135deg, #667eea, #764ba2);">
+                    <div class="card-header border-0" style="background: transparent;">
+                        <h5 class="mb-0 text-white">
+                            <i class="fas fa-star me-2"></i>Cầu thủ xuất sắc
+                        </h5>
                     </div>
                     <div class="card-body">
-                        <?php foreach ($recentMatches as $match): ?>
-                            <div class="mb-3 p-2 border rounded">
-                                <div class="d-flex justify-content-between">
-                                    <strong><?= date('d/m', strtotime($match['match_date'])) ?></strong>
-                                    <span class="badge bg-primary"><?= $match['total_players'] ?> người</span>
-                                </div>
-                                <?php if ($match['status'] === 'completed'): ?>
-                                    <div class="text-center mt-1">
-                                        <span class="badge bg-danger"><?= $match['team_a_score'] ?></span>
-                                        -
-                                        <span class="badge bg-primary"><?= $match['team_b_score'] ?></span>
+                        <?php if (!empty($topPlayers)): ?>
+                            <?php foreach (array_slice($topPlayers, 0, 6) as $index => $player): ?>
+                                <div class="player-item">
+                                    <div class="d-flex align-items-center">
+                                        <div class="player-avatar">
+                                            <?= strtoupper(substr($player['name'], 0, 2)) ?>
+                                        </div>
+                                        <div class="flex-grow-1">
+                                            <div class="fw-bold">
+                                                <?php if ($index < 3): ?>
+                                                    <?= $index === 0 ? '🥇' : ($index === 1 ? '🥈' : '🥉') ?>
+                                                <?php endif; ?>
+                                                <?= htmlspecialchars($player['name']) ?>
+                                            </div>
+                                            <small class="opacity-75">
+                                                <?= formatPosition($player['main_position']) ?>
+                                            </small>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="fw-bold"><?= $player['total_points'] ?></div>
+                                            <small class="opacity-75">điểm</small>
+                                        </div>
                                     </div>
-                                <?php else: ?>
-                                    <div class="text-muted small">Chưa có kết quả</div>
-                                <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="text-center text-white-50 py-4">
+                                <i class="fas fa-users fa-2x mb-2"></i>
+                                <p>Chưa có dữ liệu cầu thủ</p>
                             </div>
-                        <?php endforeach; ?>
+                        <?php endif; ?>
                         
-                        <a href="history.php" class="btn btn-outline-primary btn-sm w-100">
-                            <i class="fas fa-list"></i> Xem tất cả
-                        </a>
+                        <div class="text-center mt-3">
+                            <a href="leaderboard.php" class="btn btn-outline-light">
+                                <i class="fas fa-trophy"></i> Bảng xếp hạng
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Photo Gallery Showcase -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card card-custom">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            <i class="fas fa-camera me-2"></i>Khoảnh khắc đáng nhớ
+                        </h5>
+                        <button class="btn btn-outline-primary btn-sm" onclick="showAllPhotos()">
+                            <i class="fas fa-images"></i> Xem tất cả
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2" id="photoGallery">
+                            <?php
+                            // Get list of images from images folder
+                            $imageDir = 'images/';
+                            $images = [];
+                            
+                            // Check if images directory exists
+                            if (is_dir($imageDir)) {
+                                $imageFiles = glob($imageDir . "*.{jpg,jpeg,png,gif,webp}", GLOB_BRACE);
+                                
+                                // Filter out main team photo and limit to 6 for homepage
+                                foreach ($imageFiles as $image) {
+                                    $filename = basename($image);
+                                    if ($filename !== 'team-main.jpg' && count($images) < 6) {
+                                        $images[] = $image;
+                                    }
+                                }
+                            }
+                            
+                            // If no images found, show placeholder
+                            if (empty($images)) {
+                                for ($i = 1; $i <= 6; $i++) {
+                                    echo '<div class="col-lg-2 col-md-3 col-4">
+                                        <div class="gallery-item">
+                                            <img src="data:image/svg+xml,<svg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 300 200\'><rect width=\'300\' height=\'200\' fill=\'%23f8f9fa\'/><text x=\'150\' y=\'90\' text-anchor=\'middle\' font-size=\'14\' fill=\'%236c757d\'>Ảnh ' . $i . '</text><text x=\'150\' y=\'110\' text-anchor=\'middle\' font-size=\'12\' fill=\'%236c757d\'>FC Gà Gáy</text><rect x=\'10\' y=\'10\' width=\'280\' height=\'180\' fill=\'none\' stroke=\'%23dee2e6\' stroke-width=\'2\' rx=\'10\'/></svg>" 
+                                                 alt="Khoảnh khắc FC Gà Gáy" 
+                                                 class="gallery-img">
+                                            <div class="gallery-overlay">
+                                                <i class="fas fa-search-plus"></i>
+                                            </div>
+                                        </div>
+                                    </div>';
+                                }
+                            } else {
+                                // Display actual images
+                                foreach ($images as $image) {
+                                    $filename = basename($image);
+                                    $alt = "Khoảnh khắc FC Gà Gáy - " . pathinfo($filename, PATHINFO_FILENAME);
+                                    
+                                    echo '<div class="col-lg-2 col-md-3 col-4">
+                                        <div class="gallery-item" onclick="viewImage(\'' . $image . '\', \'' . htmlspecialchars($alt) . '\')">
+                                            <img src="' . $image . '" 
+                                                 alt="' . htmlspecialchars($alt) . '" 
+                                                 class="gallery-img"
+                                                 loading="lazy">
+                                            <div class="gallery-overlay">
+                                                <i class="fas fa-search-plus"></i>
+                                            </div>
+                                        </div>
+                                    </div>';
+                                }
+                            }
+                            ?>
+                        </div>
+                        
+                        <?php if (count($images) >= 6): ?>
+                            <div class="text-center mt-3">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle"></i>
+                                    Hiển thị 6 ảnh gần đây nhất. Click "Xem tất cả" để xem thêm.
+                                </small>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="quick-actions-section">
+                    <h5 class="text-center mb-4">Truy cập nhanh</h5>
+                    <div class="row">
+                        <div class="col-md-3 col-6 mb-3">
+                            <a href="register.php" class="btn btn-outline-success w-100">
+                                <i class="fas fa-user-plus fa-2x d-block mb-2"></i>
+                                Đăng ký thi đấu
+                            </a>
+                        </div>
+                        <div class="col-md-3 col-6 mb-3">
+                            <a href="match_result.php" class="btn btn-outline-warning w-100">
+                                <i class="fas fa-edit fa-2x d-block mb-2"></i>
+                                Nhập kết quả
+                            </a>
+                        </div>
+                        <div class="col-md-3 col-6 mb-3">
+                            <a href="leaderboard.php" class="btn btn-outline-primary w-100">
+                                <i class="fas fa-trophy fa-2x d-block mb-2"></i>
+                                Bảng xếp hạng
+                            </a>
+                        </div>
+                        <div class="col-md-3 col-6 mb-3">
+                            <a href="players.php" class="btn btn-outline-info w-100">
+                                <i class="fas fa-users fa-2x d-block mb-2"></i>
+                                Quản lý cầu thủ
+                            </a>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Result Modal -->
-    <div class="modal fade" id="formationModal" tabindex="-1">
+    <!-- Photo Viewer Modal -->
+    <div class="modal fade" id="photoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="photoModalTitle">Khoảnh khắc FC Gà Gáy</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body text-center">
+                    <img id="photoModalImage" src="" alt="" class="img-fluid">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
+                    <button type="button" class="btn btn-primary" onclick="downloadImage()">
+                        <i class="fas fa-download"></i> Tải về
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Photos Modal -->
+    <div class="modal fade" id="allPhotosModal" tabindex="-1">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">⚽ Đội hình được chia</h5>
+                    <h5 class="modal-title">
+                        <i class="fas fa-images me-2"></i>Thư viện ảnh FC Gà Gáy
+                    </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body" id="formationContent"></div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Đóng</button>
-                    <button type="button" id="confirmFormation" class="btn btn-success">
-                        <i class="fas fa-check"></i> Xác nhận đội hình
-                    </button>
+                <div class="modal-body">
+                    <div class="row g-3" id="allPhotosGrid">
+                        <!-- Photos will be loaded here -->
+                    </div>
                 </div>
             </div>
         </div>
@@ -614,314 +794,138 @@ $allPlayers = $stmt->fetchAll();
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Player checkbox selection
-        const playerCheckboxes = document.querySelectorAll('.player-checkbox');
-        const registerBtn = document.getElementById('registerSelectedBtn');
-        const selectedCountSpan = document.getElementById('selectedCount');
-
-        // Update selected count and button state
-        function updateSelectedCount() {
-            const selectedCount = document.querySelectorAll('.player-checkbox:checked').length;
-            selectedCountSpan.textContent = selectedCount;
-            registerBtn.disabled = selectedCount === 0;
-        }
-
-        // Add event listeners to checkboxes
-        playerCheckboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', updateSelectedCount);
+        // Simple animations
+        document.addEventListener('DOMContentLoaded', function() {
+            // Fade in cards
+            const cards = document.querySelectorAll('.card-custom, .recent-match-card, .player-item');
+            cards.forEach((card, index) => {
+                card.style.opacity = '0';
+                card.style.transform = 'translateY(20px)';
+                card.style.transition = 'all 0.5s ease';
+                
+                setTimeout(() => {
+                    card.style.opacity = '1';
+                    card.style.transform = 'translateY(0)';
+                }, index * 100);
+            });
         });
 
-        // Select all function
-        function selectAll() {
-            playerCheckboxes.forEach(checkbox => {
-                checkbox.checked = true;
-            });
-            updateSelectedCount();
-        }
-
-        // Unselect all function
-        function unselectAll() {
-            playerCheckboxes.forEach(checkbox => {
-                checkbox.checked = false;
-            });
-            updateSelectedCount();
-        }
-
-        // Update UI counters
-        function updateCounters() {
-            const currentRegistered = document.querySelectorAll('.player-compact').length;
-            document.getElementById('registeredCount').textContent = currentRegistered;
-            document.getElementById('totalRegistered').textContent = currentRegistered;
-            document.getElementById('currentTotal').textContent = currentRegistered;
-        }
-
-        // Register selected players
-        document.getElementById('registerSelectedBtn')?.addEventListener('click', function() {
-            const selectedPlayers = Array.from(document.querySelectorAll('.player-checkbox:checked'))
-                .map(checkbox => checkbox.value);
-            
-            if (selectedPlayers.length === 0) {
-                alert('Vui lòng chọn ít nhất 1 cầu thủ');
-                return;
-            }
-
-            // Disable button to prevent multiple clicks
-            this.disabled = true;
-            this.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang đăng ký...';
-
-            // Register players one by one
-            registerPlayersSequentially(selectedPlayers, 0);
-        });
-
-        function registerPlayersSequentially(playerIds, index) {
-            if (index >= playerIds.length) {
-                // All players registered, reload page
-                alert(`Đã đăng ký thành công ${playerIds.length} cầu thủ!`);
-                location.reload();
-                return;
-            }
-
-            const playerId = playerIds[index];
-            
-            fetch('api.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'register_player',
-                    player_id: playerId,
-                    date: '<?= $currentDate ?>'
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.error) {
-                    console.error(`Lỗi đăng ký cầu thủ ${playerId}:`, data.error);
-                }
-                // Continue with next player regardless of success/failure
-                registerPlayersSequentially(playerIds, index + 1);
-            })
-            .catch(error => {
-                console.error(`Network error for player ${playerId}:`, error);
-                // Continue with next player even on network error
-                registerPlayersSequentially(playerIds, index + 1);
-            });
-        }
-
-        // Remove player (existing functionality)
-        document.querySelectorAll('.remove-player').forEach(btn => {
-            btn.addEventListener('click', function() {
-                const playerId = this.dataset.playerId;
-                
-                if (!confirm('Bạn có chắc muốn hủy đăng ký cầu thủ này?')) {
-                    return;
-                }
-                
-                // Add loading state
-                this.disabled = true;
-                this.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-                
+        // Auto-refresh registration count
+        setInterval(function() {
+            if (document.visibilityState === 'visible') {
                 fetch('api.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        action: 'unregister_player',
-                        player_id: playerId,
-                        date: '<?= $currentDate ?>'
+                        action: 'get_today_registrations'
                     })
                 })
                 .then(response => response.json())
                 .then(data => {
-                    if (data.error) {
-                        alert(data.error);
-                        this.disabled = false;
-                        this.innerHTML = '<i class="fas fa-times"></i>';
-                    } else {
-                        // Remove from UI immediately
-                        const playerElement = this.closest('.player-compact');
-                        playerElement.style.animation = 'fadeOut 0.3s ease-out forwards';
-                        setTimeout(() => {
-                            playerElement.remove();
-                            updateCounters();
-                        }, 300);
+                    if (data.count !== undefined) {
+                        const alertElement = document.querySelector('.alert-success');
+                        if (data.count > 0) {
+                            if (alertElement) {
+                                alertElement.innerHTML = `
+                                    <i class="fas fa-users"></i>
+                                    Hôm nay đã có <strong>${data.count}</strong> người đăng ký
+                                `;
+                            }
+                        } else if (alertElement) {
+                            alertElement.style.display = 'none';
+                        }
                     }
                 })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('Có lỗi xảy ra khi hủy đăng ký');
-                    this.disabled = false;
-                    this.innerHTML = '<i class="fas fa-times"></i>';
-                });
-            });
-        });
+                .catch(error => console.log('Auto-refresh error:', error));
+            }
+        }, 30000);
 
-        // Divide teams
-        document.getElementById('divideTeamsBtn')?.addEventListener('click', function() {
-            divideTeams(false);
-        });
+        // View single image
+        function viewImage(src, alt) {
+            const modal = new bootstrap.Modal(document.getElementById('photoModal'));
+            document.getElementById('photoModalImage').src = src;
+            document.getElementById('photoModalImage').alt = alt;
+            document.getElementById('photoModalTitle').textContent = alt;
+            modal.show();
+        }
 
-        document.getElementById('previewBtn')?.addEventListener('click', function() {
-            divideTeams(true);
-        });
-
-        function divideTeams(preview = false) {
-            const btn = preview ? document.getElementById('previewBtn') : document.getElementById('divideTeamsBtn');
-            const originalText = btn.innerHTML;
+        // Show all photos
+        function showAllPhotos() {
+            const modal = new bootstrap.Modal(document.getElementById('allPhotosModal'));
+            const grid = document.getElementById('allPhotosGrid');
             
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (preview ? 'Đang xử lý...' : 'Đang chia đội...');
+            // Show loading
+            grid.innerHTML = '<div class="col-12 text-center"><i class="fas fa-spinner fa-spin fa-2x"></i><p class="mt-2">Đang tải ảnh...</p></div>';
             
+            modal.show();
+            
+            // Load all photos
             fetch('api.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    action: 'divide_teams',
-                    date: '<?= $currentDate ?>',
-                    preview: preview
+                    action: 'get_all_photos'
                 })
             })
             .then(response => response.json())
             .then(data => {
-                btn.disabled = false;
-                btn.innerHTML = originalText;
-                
-                if (data.error) {
-                    alert(data.error);
-                } else {
-                    showFormation(data.data, preview);
-                    if (!preview) {
-                        setTimeout(() => location.reload(), 2000);
-                    }
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Có lỗi xảy ra khi chia đội');
-                btn.disabled = false;
-                btn.innerHTML = originalText;
-            });
-        }
-
-        function showFormation(data, preview) {
-            const modal = new bootstrap.Modal(document.getElementById('formationModal'));
-            const content = document.getElementById('formationContent');
-            const confirmBtn = document.getElementById('confirmFormation');
-            
-            content.innerHTML = generateFormationHTML(data);
-            confirmBtn.style.display = preview ? 'block' : 'none';
-            
-            if (preview) {
-                confirmBtn.onclick = function() {
-                    divideTeams(false);
-                    modal.hide();
-                };
-            }
-            
-            modal.show();
-        }
-
-        function generateFormationHTML(data) {
-            let html = `
-                <div class="row mb-3">
-                    <div class="col-md-4 text-center">
-                        <div class="h4">🔴 Đội A</div>
-                        <div class="h5">${data.stats.totalA} người</div>
-                    </div>
-                    <div class="col-md-4 text-center">
-                        <div class="h5">VS</div>
-                        <div class="small text-muted">Sức mạnh cân bằng</div>
-                    </div>
-                    <div class="col-md-4 text-center">
-                        <div class="h4">🔵 Đội B</div>
-                        <div class="h5">${data.stats.totalB} người</div>
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-6">
-                        <div class="team-formation team-a">
-                            ${generateTeamHTML(data.teamA, 'A')}
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="team-formation team-b">
-                            ${generateTeamHTML(data.teamB, 'B')}
-                        </div>
-                    </div>
-                </div>
-            `;
-            return html;
-        }
-
-        function generateTeamHTML(team, teamName) {
-            const positions = ['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'];
-            let html = '<h5 class="text-center mb-3">Đội ' + teamName + '</h5>';
-            
-            positions.forEach(position => {
-                if (team[position] && team[position].length > 0) {
-                    html += `<div class="mb-3">
-                        <h6 class="position-header">${position} (${team[position].length})</h6>`;
-                    
-                    team[position].forEach(player => {
-                        const skillColor = player.skill_level === 'Tốt' ? 'success' : 
-                                         player.skill_level === 'Trung bình' ? 'warning' : 'secondary';
-                        
+                if (data.photos && data.photos.length > 0) {
+                    let html = '';
+                    data.photos.forEach(photo => {
                         html += `
-                            <div class="border rounded p-2 mb-2 bg-white">
-                                <strong>${player.name}</strong>
-                                <div class="small">
-                                    <span class="badge bg-info">${player.position_type}</span>
-                                    <span class="badge bg-${skillColor}">${player.skill_level}</span>
+                            <div class="col-lg-3 col-md-4 col-6">
+                                <div class="gallery-item" onclick="viewImage('${photo.src}', '${photo.alt}')">
+                                    <img src="${photo.src}" alt="${photo.alt}" class="gallery-img" loading="lazy">
+                                    <div class="gallery-overlay">
+                                        <i class="fas fa-search-plus"></i>
+                                    </div>
                                 </div>
                             </div>
                         `;
                     });
-                    
-                    html += '</div>';
+                    grid.innerHTML = html;
+                } else {
+                    grid.innerHTML = '<div class="col-12 text-center text-muted"><i class="fas fa-images fa-3x mb-3"></i><p>Chưa có ảnh nào được tải lên</p></div>';
                 }
+            })
+            .catch(error => {
+                console.error('Error loading photos:', error);
+                grid.innerHTML = '<div class="col-12 text-center text-danger"><i class="fas fa-exclamation-triangle fa-3x mb-3"></i><p>Lỗi khi tải ảnh</p></div>';
             });
-            
-            return html;
         }
 
-        // Load today's formation if exists
-        <?php if ($todayMatch && $todayMatch['team_a_formation']): ?>
-            const todayFormation = {
-                teamA: <?= $todayMatch['team_a_formation'] ?>,
-                teamB: <?= $todayMatch['team_b_formation'] ?>,
-                stats: {
-                    totalA: <?= array_sum(array_map('count', json_decode($todayMatch['team_a_formation'], true))) ?>,
-                    totalB: <?= array_sum(array_map('count', json_decode($todayMatch['team_b_formation'], true))) ?>
-                }
-            };
-            document.getElementById('todayFormation').innerHTML = generateFormationHTML(todayFormation);
-        <?php endif; ?>
-
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            updateSelectedCount();
-            updateCounters();
-            
-            // Add CSS animations
-            const style = document.createElement('style');
-            style.textContent = `
-                @keyframes fadeOut {
-                    from { opacity: 1; transform: scale(1); }
-                    to { opacity: 0; transform: scale(0.8); }
-                }
-                
-                .player-compact {
-                    animation: fadeIn 0.3s ease-in forwards;
-                }
-                
-                @keyframes fadeIn {
-                    from { opacity: 0; transform: translateY(-10px); }
-                    to { opacity: 1; transform: translateY(0); }
-                }
-            `;
-            document.head.appendChild(style);
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+                e.preventDefault();
+                window.location.href = 'register.php';
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+                e.preventDefault();
+                window.location.href = 'leaderboard.php';
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+                e.preventDefault();
+                showAllPhotos();
+            }
         });
 
-        // Auto-refresh counters every 30 seconds
-        setInterval(updateCounters, 30000);
+        // Lazy loading for images
+        if ('IntersectionObserver' in window) {
+            const imageObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        img.classList.add('loaded');
+                        imageObserver.unobserve(img);
+                    }
+                });
+            });
+
+            document.querySelectorAll('.gallery-img').forEach(img => {
+                imageObserver.observe(img);
+            });
+        }
     </script>
 </body>
 </html>

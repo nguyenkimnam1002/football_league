@@ -87,6 +87,14 @@ try {
         case 'get_match_stats':
             getMatchStats($input);
             break;
+        
+        case 'get_today_registrations':
+            getTodayRegistrations($input);
+            break;
+
+        case 'get_all_photos':
+            getAllPhotos($input);
+            break;
             
         default:
             ob_clean();
@@ -774,6 +782,58 @@ function getMatchStats($input) {
     
     ob_clean();
     echo json_encode(['success' => 'Tải thống kê thành công', 'data' => $responseData], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getTodayRegistrations($input) {
+    global $pdo;
+    
+    $currentDate = getCurrentDate();
+    
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*) as count
+        FROM daily_registrations 
+        WHERE registration_date = ?
+    ");
+    $stmt->execute([$currentDate]);
+    $count = $stmt->fetchColumn();
+    
+    ob_clean();
+    echo json_encode(['success' => true, 'count' => $count], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getAllPhotos($input) {
+    $imageDir = 'images/';
+    $photos = [];
+    
+    if (is_dir($imageDir)) {
+        // Get all image files
+        $imageFiles = glob($imageDir . "*.{jpg,jpeg,png,gif,webp}", GLOB_BRACE);
+        
+        foreach ($imageFiles as $image) {
+            $filename = basename($image);
+            
+            // Skip main team photo as it's used separately
+            if ($filename === 'team-main.jpg') {
+                continue;
+            }
+            
+            $photos[] = [
+                'src' => $image,
+                'alt' => 'Khoảnh khắc FC Gà Gáy - ' . pathinfo($filename, PATHINFO_FILENAME),
+                'filename' => $filename
+            ];
+        }
+        
+        // Sort by filename (newest first if using date naming convention)
+        usort($photos, function($a, $b) {
+            return strcmp($b['filename'], $a['filename']);
+        });
+    }
+    
+    ob_clean();
+    echo json_encode(['success' => true, 'photos' => $photos], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
