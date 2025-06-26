@@ -78,6 +78,14 @@ $stmt = $pdo->prepare("
 ");
 $stmt->execute([$currentDate]);
 $recentMatches = $stmt->fetchAll();
+
+// Lấy status hiện tại từ DB
+$current_status = '';
+$result = $pdo->prepare("SELECT status FROM daily_matches WHERE id = ?");
+$result->execute([$matchId]);
+if ($row = $result->fetch()) {
+    $current_status = $row["status"];
+}
 ?>
 
 <!DOCTYPE html>
@@ -286,6 +294,26 @@ $recentMatches = $stmt->fetchAll();
                             <i class="fas fa-trophy"></i> Bảng xếp hạng
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="players.php">
+                            <i class="fas fa-users"></i> Quản lý cầu thủ
+                        </a>
+                    </li>
+                </ul>
+                
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-cog"></i> Tiện ích
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="players.php"><i class="fas fa-users"></i> Quản lý cầu thủ</a></li>
+                            <li><a class="dropdown-item" href="history.php"><i class="fas fa-history"></i> Lịch sử trận đấu</a></li>
+                            <li><a class="dropdown-item" href="statistics.php"><i class="fas fa-chart-bar"></i> Thống kê chi tiết</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="settings.php"><i class="fas fa-settings"></i> Cài đặt</a></li>
+                        </ul>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -440,6 +468,17 @@ $recentMatches = $stmt->fetchAll();
                         <?php endif; ?>
                     </div>
                 <?php endif; ?>
+                
+                <!-- Cho phép admin mở trạng thái   -->
+                <div hidden>
+                    <label>Chọn trạng thái:</label>
+                    <select name="statusNew" id="statusNew">
+                        <option value="scheduled" <?= $current_status == 'scheduled' ? 'selected' : '' ?>>Scheduled</option>
+                        <option value="locked" <?= $current_status == 'locked' ? 'selected' : '' ?>>Locked</option>
+                        <option value="completed" <?= $current_status == 'completed' ? 'selected' : '' ?>>Completed</option>
+                    </select>
+                    <button onclick="updateStatus()" class="btn btn-outline-secondary btn-lg ms-2">Lưu trạng thái</button>
+                </div>
 
                 <!-- Player Statistics & Team Management -->
                 <div class="card card-custom">
@@ -772,6 +811,43 @@ $recentMatches = $stmt->fetchAll();
                 // Disable drag and drop
                 disableDragAndDrop();
             }
+        }
+
+        // update Status
+        function updateStatus() {
+            if (!confirm(`Bạn có chắc muốn update trạng thái này không?`)) {
+                return;
+            }
+
+            const statusNew = document.getElementById('statusNew').value;
+            
+            fetch('api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'update_status',
+                    match_id: matchId,
+                    newStatus: statusNew
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Lỗi: ' + data.error);
+                    restorePlayerItems(playerItems);
+                } else {
+                    showNotification('Update trạng thái thành công!', 'success');
+                    
+                    // Reload page to update team lists
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Có lỗi xảy ra khi update');
+            });
         }
 
         // Add player to team

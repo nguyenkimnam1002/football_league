@@ -242,6 +242,11 @@ $allPlayers = $stmt->fetchAll();
                             <i class="fas fa-trophy"></i> Bảng xếp hạng
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="players.php">
+                            <i class="fas fa-users"></i> Quản lý cầu thủ
+                        </a>
+                    </li>
                 </ul>
                 
                 <ul class="navbar-nav">

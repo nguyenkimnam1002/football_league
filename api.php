@@ -2,6 +2,10 @@
 // Tắt hiển thị lỗi PHP để không ảnh hưởng JSON response
 ini_set('display_errors', 0);
 error_reporting(0);
+// Hiển thị lỗi để debug (gỡ bỏ sau khi hoàn thiện)
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
 
 require_once 'config.php';
 require_once 'TeamDivision.php';
@@ -70,6 +74,10 @@ try {
             
         case 'remove_player_from_match':
             removePlayerFromMatch($input);
+            break;
+
+        case 'update_status':
+            updateStatus($input);
             break;
             
         default:
@@ -560,6 +568,35 @@ function updateMatchResult($input) {
     } catch (Exception $e) {
         $pdo->rollBack();
         throw new Exception('Lỗi khi cập nhật kết quả: ' . $e->getMessage());
+    }
+}
+
+function updateStatus($input) {
+    global $pdo;
+    $new_status = $input['newStatus'] ?? null;
+    $match_id = $input['match_id'] ?? null;
+
+
+    // Kiểm tra giá trị hợp lệ
+    $valid_statuses = ['scheduled', 'locked', 'completed'];
+    try {
+        $pdo->beginTransaction();
+
+        // Update match result
+        $stmt = $pdo->prepare("
+            UPDATE daily_matches SET status = ? WHERE id = ?
+        ");
+        $stmt->execute([$new_status, $match_id]);
+        
+        $pdo->commit();
+        
+        ob_clean();
+        echo json_encode(['success' => 'Cập nhật thành công'], JSON_UNESCAPED_UNICODE);
+        exit;
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw new Exception('Lỗi khi cập nhật: ' . $e->getMessage());
     }
 }
 

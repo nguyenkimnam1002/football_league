@@ -175,15 +175,17 @@ $positionStats = $stmt->fetchAll();
         }
         
         input, select, textarea {
-            font-family: inherit !important;
+            font-family: 'Times New Roman', Times, serif; !important;
             font-size: 14px !important;
             line-height: 1.5 !important;
+            text-transform: none;
         }
         
         .form-control, .form-select {
-            font-family: inherit !important;
+            font-family: 'Times New Roman', Times, serif; !important;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            text-transform: none;
         }
         
         .gradient-bg {
@@ -270,7 +272,7 @@ $positionStats = $stmt->fetchAll();
         .modal input[type="text"],
         .modal select,
         .modal textarea {
-            font-family: inherit !important;
+            font-family: 'Times New Roman' !important;
             font-size: 14px !important;
             line-height: 1.5 !important;
             -webkit-font-smoothing: antialiased;
@@ -279,12 +281,12 @@ $positionStats = $stmt->fetchAll();
         
         /* Ensure proper Vietnamese text rendering */
         .modal-body {
-            font-family: inherit;
+            font-family: 'Times New Roman';
         }
         
         .form-control:focus,
         .form-select:focus {
-            font-family: inherit !important;
+            font-family: 'Times New Roman' !important;
             box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
         }
     </style>
@@ -322,6 +324,21 @@ $positionStats = $stmt->fetchAll();
                         <a class="nav-link active" href="players.php">
                             <i class="fas fa-users"></i> Quản lý cầu thủ
                         </a>
+                    </li>
+                </ul>
+                
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-cog"></i> Tiện ích
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="players.php"><i class="fas fa-users"></i> Quản lý cầu thủ</a></li>
+                            <li><a class="dropdown-item" href="history.php"><i class="fas fa-history"></i> Lịch sử trận đấu</a></li>
+                            <li><a class="dropdown-item" href="statistics.php"><i class="fas fa-chart-bar"></i> Thống kê chi tiết</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="settings.php"><i class="fas fa-settings"></i> Cài đặt</a></li>
+                        </ul>
                     </li>
                 </ul>
             </div>
@@ -848,7 +865,7 @@ $positionStats = $stmt->fetchAll();
             // Fix Vietnamese font rendering
             const inputs = document.querySelectorAll('input[type="text"], textarea');
             inputs.forEach(input => {
-                input.style.fontFamily = 'inherit';
+                input.style.fontFamily = 'Times New Roman';
                 input.style.fontSize = '14px';
                 input.style.lineHeight = '1.5';
             });
@@ -869,7 +886,7 @@ $positionStats = $stmt->fetchAll();
                 
                 // Fix font on focus
                 input.addEventListener('focus', function() {
-                    this.style.fontFamily = 'inherit';
+                    this.style.fontFamily = 'Times New Roman';
                     this.style.fontSize = '14px';
                 });
             });
@@ -969,13 +986,17 @@ $positionStats = $stmt->fetchAll();
         // Export functionality
         function exportPlayers() {
             const players = <?= json_encode($players) ?>;
+
+            // Sắp xếp giảm dần theo tổng điểm
+            players.sort((a, b) => b.total_points - a.total_points);
             
-            let csv = 'Tên,Vị trí chính,Vị trí phụ,Trình độ chính,Trình độ phụ,Tổng điểm,Tổng trận,Tổng bàn thắng,Tổng kiến tạo\n';
+            // BOM để Excel hiểu UTF-8
+            let csv = '\uFEFFTên,Vị trí chính,Vị trí phụ,Trình độ chính,Trình độ phụ,Tổng điểm,Tổng trận,Tổng bàn thắng,Tổng kiến tạo\n';
             
             players.forEach(player => {
                 csv += `"${player.name}","${player.main_position}","${player.secondary_position || ''}","${player.main_skill}","${player.secondary_skill || ''}",${player.total_points},${player.total_matches},${player.total_goals},${player.total_assists}\n`;
             });
-            
+
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement('a');
             const url = URL.createObjectURL(blob);

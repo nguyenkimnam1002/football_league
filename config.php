@@ -54,6 +54,8 @@ define('POINTS_LOSE', 0);
 // Test mode - Bỏ comment dòng dưới để enable test mode
 define('TEST_MODE', true);
 
+define('EDIT_MODE', true);
+
 // Timezone
 date_default_timezone_set('Asia/Ho_Chi_Minh');
 

@@ -189,9 +189,67 @@ $recentMatches = $stmt->fetchAll();
         .period-toggle {
             border-radius: 25px;
         }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .nav-link {
+            font-weight: 500;
+        }
     </style>
 </head>
 <body class="gradient-bg">
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="index.php">
+                <i class="fas fa-futbol"></i> Football League
+            </a>
+            
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.php">
+                            <i class="fas fa-user-plus"></i> Đăng ký
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="match_result.php">
+                            <i class="fas fa-edit"></i> Quản lý kết quả
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="leaderboard.php">
+                            <i class="fas fa-trophy"></i> Bảng xếp hạng
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="players.php">
+                            <i class="fas fa-users"></i> Quản lý cầu thủ
+                        </a>
+                    </li>
+                </ul>
+                
+                <ul class="navbar-nav">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-cog"></i> Tiện ích
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="players.php"><i class="fas fa-users"></i> Quản lý cầu thủ</a></li>
+                            <li><a class="dropdown-item" href="history.php"><i class="fas fa-history"></i> Lịch sử trận đấu</a></li>
+                            <li><a class="dropdown-item" href="statistics.php"><i class="fas fa-chart-bar"></i> Thống kê chi tiết</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="settings.php"><i class="fas fa-settings"></i> Cài đặt</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
     <div class="container py-4">
         <!-- Header -->
         <div class="card card-custom mb-4">
