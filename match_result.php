@@ -52,6 +52,22 @@ $participants = $stmt->fetchAll();
 $teamA = array_filter($participants, function($p) { return $p['team'] === 'A'; });
 $teamB = array_filter($participants, function($p) { return $p['team'] === 'B'; });
 
+// Debug: Log team data
+error_log("Team A count: " . count($teamA));
+error_log("Team B count: " . count($teamB));
+error_log("Total participants: " . count($participants));
+
+// Get unregistered players for adding to teams
+$stmt = $pdo->prepare("
+    SELECT p.* FROM players p 
+    WHERE p.id NOT IN (
+        SELECT mp.player_id FROM match_participants mp WHERE mp.match_id = ?
+    )
+    ORDER BY p.name
+");
+$stmt->execute([$matchId]);
+$unregisteredPlayers = $stmt->fetchAll();
+
 // Get recent matches for navigation
 $stmt = $pdo->prepare("
     SELECT id, match_date, team_a_score, team_b_score, status 
@@ -87,6 +103,7 @@ $recentMatches = $stmt->fetchAll();
             padding: 20px;
             margin-bottom: 20px;
             min-height: 400px;
+            position: relative;
         }
         .team-a { border-left: 4px solid #dc3545; }
         .team-b { border-left: 4px solid #007bff; }
@@ -97,6 +114,7 @@ $recentMatches = $stmt->fetchAll();
             margin-bottom: 8px;
             border: 1px solid #e9ecef;
             transition: all 0.3s ease;
+            position: relative;
         }
         .player-row:hover {
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -135,6 +153,12 @@ $recentMatches = $stmt->fetchAll();
         .edit-mode .swap-btn {
             display: inline-block !important;
         }
+        .edit-mode .remove-btn {
+            display: inline-block !important;
+        }
+        .edit-mode .add-player-section {
+            display: block !important;
+        }
         .player-row.dragging {
             opacity: 0.5;
             transform: rotate(5deg);
@@ -150,6 +174,87 @@ $recentMatches = $stmt->fetchAll();
         .balance-good { color: #28a745; }
         .balance-warning { color: #ffc107; }
         .balance-danger { color: #dc3545; }
+        
+        /* New styles for add/remove features */
+        .remove-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            padding: 0;
+            font-size: 12px;
+            display: none;
+            z-index: 10;
+        }
+        .add-player-section {
+            display: none;
+            border: 2px dashed #28a745;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            background: #f8fff9;
+        }
+        .player-select-dropdown {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .add-player-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+            transition: all 0.2s;
+        }
+        .add-player-item:hover {
+            background-color: #f0f0f0;
+            transform: translateX(3px);
+        }
+        .add-player-item:last-child {
+            border-bottom: none;
+        }
+        
+        /* Animations */
+        @keyframes swapAnimation {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); background-color: #e3f2fd; }
+            100% { transform: scale(1); }
+        }
+        @keyframes fadeOutScale {
+            0% { opacity: 1; transform: scale(1); }
+            100% { opacity: 0; transform: scale(0.8); }
+        }
+        @keyframes fadeInUp {
+            0% { opacity: 0; transform: translateY(20px); }
+            100% { opacity: 1; transform: translateY(0); }
+        }
+        .team-section.drop-zone::before {
+            content: "Thả cầu thủ vào đây";
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(40, 167, 69, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        .new-player {
+            animation: fadeInUp 0.5s ease-out;
+        }
+        
+        @keyframes slideInRight {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @keyframes slideOutRight {
+            from { transform: translateX(0); opacity: 1; }
+            to { transform: translateX(100%); opacity: 0; }
+        }
     </style>
 </head>
 <body class="gradient-bg">
@@ -368,6 +473,13 @@ $recentMatches = $stmt->fetchAll();
                             </div>
                         </div>
 
+                        <!-- Debug info (temporary) -->
+                        <?php if (defined('TEST_MODE') && TEST_MODE): ?>
+                            <div class="alert alert-info small">
+                                <strong>Debug:</strong> Team A: <?= count($teamA) ?> players, Team B: <?= count($teamB) ?> players, Total: <?= count($participants) ?> participants
+                            </div>
+                        <?php endif; ?>
+
                         <div class="row" id="teamsContainer">
                             <!-- Team A -->
                             <div class="col-md-6">
@@ -380,6 +492,14 @@ $recentMatches = $stmt->fetchAll();
                                                  data-team="A"
                                                  draggable="false"
                                                  ondragstart="drag(event)">
+                                                
+                                                <!-- Remove button (X) - only visible in edit mode -->
+                                                <button class="btn btn-danger btn-sm remove-btn" 
+                                                        onclick="removePlayerFromMatch(<?= $player['player_id'] ?>)"
+                                                        title="Loại khỏi trận đấu">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                                
                                                 <div class="d-flex justify-content-between align-items-start">
                                                     <div class="flex-grow-1">
                                                         <div class="d-flex align-items-center">
@@ -446,6 +566,32 @@ $recentMatches = $stmt->fetchAll();
                                             </div>
                                         <?php endforeach; ?>
                                     </div>
+                                    
+                                    <!-- Add Player Section for Team A -->
+                                    <div class="add-player-section" id="addPlayerSectionA">
+                                        <h6 class="text-success mb-2">➕ Thêm cầu thủ vào Đội A</h6>
+                                        <div class="dropdown">
+                                            <button class="btn btn-outline-success dropdown-toggle w-100" type="button" data-bs-toggle="dropdown">
+                                                <i class="fas fa-plus"></i> Chọn cầu thủ
+                                            </button>
+                                            <ul class="dropdown-menu w-100 player-select-dropdown" id="dropdownA">
+                                                <?php foreach ($unregisteredPlayers as $player): ?>
+                                                    <li>
+                                                        <div class="add-player-item" onclick="addPlayerToTeam(<?= $player['id'] ?>, 'A')" data-player-id="<?= $player['id'] ?>">
+                                                            <strong><?= htmlspecialchars($player['name']) ?></strong>
+                                                            <div class="small text-muted">
+                                                                <?= $player['main_position'] ?> 
+                                                                <span class="badge bg-<?= $player['main_skill'] === 'Tốt' ? 'success' : ($player['main_skill'] === 'Trung bình' ? 'warning' : 'secondary') ?> skill-badge">
+                                                                    <?= $player['main_skill'] ?>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        </div>
+                                    </div>
+                                    
                                 </div>
                             </div>
 
@@ -460,6 +606,14 @@ $recentMatches = $stmt->fetchAll();
                                                  data-team="B"
                                                  draggable="false"
                                                  ondragstart="drag(event)">
+                                                
+                                                <!-- Remove button (X) - only visible in edit mode -->
+                                                <button class="btn btn-danger btn-sm remove-btn" 
+                                                        onclick="removePlayerFromMatch(<?= $player['player_id'] ?>)"
+                                                        title="Loại khỏi trận đấu">
+                                                    <i class="fas fa-times"></i>
+                                                </button>
+                                                
                                                 <div class="d-flex justify-content-between align-items-start">
                                                     <div class="flex-grow-1">
                                                         <div class="d-flex align-items-center">
@@ -526,6 +680,32 @@ $recentMatches = $stmt->fetchAll();
                                             </div>
                                         <?php endforeach; ?>
                                     </div>
+                                    
+                                    
+                                    <!-- Add Player Section for Team B -->
+                                    <div class="add-player-section" id="addPlayerSectionB">
+                                        <h6 class="text-primary mb-2">➕ Thêm cầu thủ vào Đội B</h6>
+                                        <div class="dropdown">
+                                            <button class="btn btn-outline-primary dropdown-toggle w-100" type="button" data-bs-toggle="dropdown">
+                                                <i class="fas fa-plus"></i> Chọn cầu thủ
+                                            </button>
+                                            <ul class="dropdown-menu w-100 player-select-dropdown" id="dropdownB">
+                                                <?php foreach ($unregisteredPlayers as $player): ?>
+                                                    <li>
+                                                        <div class="add-player-item" onclick="addPlayerToTeam(<?= $player['id'] ?>, 'B')" data-player-id="<?= $player['id'] ?>">
+                                                            <strong><?= htmlspecialchars($player['name']) ?></strong>
+                                                            <div class="small text-muted">
+                                                                <?= $player['main_position'] ?> 
+                                                                <span class="badge bg-<?= $player['main_skill'] === 'Tốt' ? 'success' : ($player['main_skill'] === 'Trung bình' ? 'warning' : 'secondary') ?> skill-badge">
+                                                                    <?= $player['main_skill'] ?>
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -548,11 +728,14 @@ $recentMatches = $stmt->fetchAll();
     <script>
         let editMode = false;
         let originalFormation = null;
+        const matchId = <?= $matchId ?>;
 
         // Toggle edit mode for team swapping
         function toggleEditMode() {
             editMode = !editMode;
             const swapButtons = document.querySelectorAll('.swap-btn');
+            const removeButtons = document.querySelectorAll('.remove-btn');
+            const addPlayerSections = document.querySelectorAll('.add-player-section');
             const editModeText = document.getElementById('editModeText');
             const saveFormationBtn = document.getElementById('saveFormationBtn');
             const teamsContainer = document.getElementById('teamsContainer');
@@ -562,9 +745,11 @@ $recentMatches = $stmt->fetchAll();
                 // Enable edit mode
                 teamsContainer.classList.add('edit-mode');
                 swapButtons.forEach(btn => btn.style.display = 'inline-block');
+                removeButtons.forEach(btn => btn.style.display = 'inline-block');
+                addPlayerSections.forEach(section => section.style.display = 'block');
                 editModeText.textContent = 'Tắt chế độ đổi đội';
                 saveFormationBtn.style.display = 'inline-block';
-                instructionText.innerHTML = '<i class="fas fa-exchange-alt"></i> Đang ở chế độ đổi đội. Click các mũi tên để chuyển cầu thủ giữa 2 đội. Nhớ lưu đội hình mới sau khi chỉnh sửa.';
+                instructionText.innerHTML = '<i class="fas fa-exchange-alt"></i> Đang ở chế độ chỉnh sửa đội hình. Có thể: đổi đội, thêm/bớt cầu thủ. Nhớ lưu đội hình mới sau khi chỉnh sửa.';
                 
                 // Store original formation
                 originalFormation = getCurrentFormation();
@@ -578,6 +763,8 @@ $recentMatches = $stmt->fetchAll();
                 // Disable edit mode
                 teamsContainer.classList.remove('edit-mode');
                 swapButtons.forEach(btn => btn.style.display = 'none');
+                removeButtons.forEach(btn => btn.style.display = 'none');
+                addPlayerSections.forEach(section => section.style.display = 'none');
                 editModeText.textContent = 'Bật chế độ đổi đội';
                 saveFormationBtn.style.display = 'none';
                 instructionText.innerHTML = '<i class="fas fa-info-circle"></i> Nhập tỷ số và thống kê cầu thủ, sau đó click "Lưu kết quả" để hoàn tất.';
@@ -585,6 +772,106 @@ $recentMatches = $stmt->fetchAll();
                 // Disable drag and drop
                 disableDragAndDrop();
             }
+        }
+
+        // Add player to team
+        function addPlayerToTeam(playerId, team) {
+            if (!confirm(`Bạn có chắc muốn thêm cầu thủ này vào Đội ${team}?`)) {
+                return;
+            }
+            
+            // Show loading state
+            const playerItems = document.querySelectorAll(`[data-player-id="${playerId}"]`);
+            playerItems.forEach(item => {
+                if (item.classList.contains('add-player-item')) {
+                    item.style.opacity = '0.5';
+                    item.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang thêm...';
+                }
+            });
+            
+            fetch('api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'add_player_to_match',
+                    match_id: matchId,
+                    player_id: playerId,
+                    team: team
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Lỗi: ' + data.error);
+                    restorePlayerItems(playerItems);
+                } else {
+                    showNotification('Thêm cầu thủ thành công!', 'success');
+                    
+                    // Remove from dropdown menus
+                    playerItems.forEach(item => {
+                        if (item.classList.contains('add-player-item')) {
+                            item.closest('li').remove();
+                        }
+                    });
+                    
+                    // Reload page to update team lists
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Có lỗi xảy ra khi thêm cầu thủ');
+                restorePlayerItems(playerItems);
+            });
+        }
+
+        // Remove player from match
+        function removePlayerFromMatch(playerId) {
+            if (!confirm('Bạn có chắc muốn loại cầu thủ này khỏi trận đấu?')) {
+                return;
+            }
+            
+            // Show loading state
+            const playerElement = document.querySelector(`[data-player-id="${playerId}"]`);
+            const removeBtn = playerElement.querySelector('.remove-btn');
+            removeBtn.disabled = true;
+            removeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            fetch('api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'remove_player_from_match',
+                    match_id: matchId,
+                    player_id: playerId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Lỗi: ' + data.error);
+                    removeBtn.disabled = false;
+                    removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+                } else {
+                    showNotification('Loại cầu thủ thành công!', 'success');
+                    
+                    // Remove from UI with animation
+                    playerElement.style.animation = 'fadeOutScale 0.3s ease-out forwards';
+                    setTimeout(() => {
+                        playerElement.remove();
+                        updateTeamCounts();
+                        updateTeamBalance();
+                    }, 300);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Có lỗi xảy ra khi loại cầu thủ');
+                removeBtn.disabled = false;
+                removeBtn.innerHTML = '<i class="fas fa-times"></i>';
+            });
         }
 
         // Swap player between teams
@@ -617,6 +904,8 @@ $recentMatches = $stmt->fetchAll();
             playerRow.style.animation = 'swapAnimation 0.5s ease-in-out';
             setTimeout(() => {
                 playerRow.style.animation = '';
+                updateTeamCounts();
+                updateTeamBalance();
             }, 500);
         }
 
@@ -663,8 +952,11 @@ $recentMatches = $stmt->fetchAll();
             const teamACount = document.querySelectorAll('[data-team="A"]').length;
             const teamBCount = document.querySelectorAll('[data-team="B"]').length;
             
-            document.getElementById('teamACount').textContent = teamACount;
-            document.getElementById('teamBCount').textContent = teamBCount;
+            const teamACountElement = document.getElementById('teamACount');
+            const teamBCountElement = document.getElementById('teamBCount');
+            
+            if (teamACountElement) teamACountElement.textContent = teamACount;
+            if (teamBCountElement) teamBCountElement.textContent = teamBCount;
         }
 
         // Calculate and display team balance
@@ -675,15 +967,23 @@ $recentMatches = $stmt->fetchAll();
             const balanceA = document.getElementById('teamABalance');
             const balanceB = document.getElementById('teamBBalance');
             
-            balanceA.innerHTML = `Sức mạnh: ${teamABalance.total} | Tốt: ${teamABalance.good} | TB: ${teamABalance.average} | Yếu: ${teamABalance.weak}`;
-            balanceB.innerHTML = `Sức mạnh: ${teamBBalance.total} | Tốt: ${teamBBalance.good} | TB: ${teamBBalance.average} | Yếu: ${teamBBalance.weak}`;
+            if (balanceA) {
+                balanceA.innerHTML = `Sức mạnh: ${teamABalance.total} | Tốt: ${teamABalance.good} | TB: ${teamABalance.average} | Yếu: ${teamABalance.weak}`;
+                
+                // Color coding based on balance
+                const difference = Math.abs(teamABalance.total - teamBBalance.total);
+                const balanceClass = difference <= 2 ? 'balance-good' : difference <= 5 ? 'balance-warning' : 'balance-danger';
+                balanceA.className = `balance-indicator ${balanceClass}`;
+            }
             
-            // Color coding based on balance
-            const difference = Math.abs(teamABalance.total - teamBBalance.total);
-            const balanceClass = difference <= 2 ? 'balance-good' : difference <= 5 ? 'balance-warning' : 'balance-danger';
-            
-            balanceA.className = `balance-indicator ${balanceClass}`;
-            balanceB.className = `balance-indicator ${balanceClass}`;
+            if (balanceB) {
+                balanceB.innerHTML = `Sức mạnh: ${teamBBalance.total} | Tốt: ${teamBBalance.good} | TB: ${teamBBalance.average} | Yếu: ${teamBBalance.weak}`;
+                
+                // Color coding based on balance
+                const difference = Math.abs(teamABalance.total - teamBBalance.total);
+                const balanceClass = difference <= 2 ? 'balance-good' : difference <= 5 ? 'balance-warning' : 'balance-danger';
+                balanceB.className = `balance-indicator ${balanceClass}`;
+            }
         }
 
         function calculateTeamStrength(team) {
@@ -695,21 +995,28 @@ $recentMatches = $stmt->fetchAll();
             
             players.forEach(player => {
                 const skillBadge = player.querySelector('.skill-badge');
-                const skillLevel = skillBadge.textContent.trim();
-                
-                switch (skillLevel) {
-                    case 'Tốt':
-                        total += 3;
-                        good++;
-                        break;
-                    case 'Trung bình':
-                        total += 2;
-                        average++;
-                        break;
-                    case 'Yếu':
-                        total += 1;
-                        weak++;
-                        break;
+                if (skillBadge && skillBadge.textContent) {
+                    const skillLevel = skillBadge.textContent.trim();
+                    
+                    switch (skillLevel) {
+                        case 'Tốt':
+                            total += 3;
+                            good++;
+                            break;
+                        case 'Trung bình':
+                            total += 2;
+                            average++;
+                            break;
+                        case 'Yếu':
+                            total += 1;
+                            weak++;
+                            break;
+                        default:
+                            // Handle unexpected values
+                            total += 1;
+                            weak++;
+                            break;
+                    }
                 }
             });
             
@@ -737,6 +1044,11 @@ $recentMatches = $stmt->fetchAll();
                 return;
             }
             
+            const saveBtn = document.getElementById('saveFormationBtn');
+            const originalText = saveBtn.innerHTML;
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
+            
             const currentFormation = getCurrentFormation();
             
             fetch('api.php', {
@@ -744,23 +1056,30 @@ $recentMatches = $stmt->fetchAll();
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action: 'update_formation',
-                    match_id: <?= $matchId ?>,
+                    match_id: matchId,
                     team_a_players: currentFormation.teamA,
                     team_b_players: currentFormation.teamB
                 })
             })
             .then(response => response.json())
             .then(data => {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalText;
+                
                 if (data.error) {
                     alert('Lỗi: ' + data.error);
                 } else {
-                    alert('Lưu đội hình mới thành công!');
-                    location.reload();
+                    showNotification('Lưu đội hình mới thành công!', 'success');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 1500);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 alert('Có lỗi xảy ra khi lưu đội hình');
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = originalText;
             });
         }
 
@@ -799,13 +1118,19 @@ $recentMatches = $stmt->fetchAll();
                 return;
             }
             
+            // Show loading state
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const originalBtnText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang lưu...';
+            
             // Save match result
             fetch('api.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action: 'update_match_result',
-                    match_id: <?= $matchId ?>,
+                    match_id: matchId,
                     team_a_score: teamAScore,
                     team_b_score: teamBScore,
                     player_stats: playerStats
@@ -813,16 +1138,23 @@ $recentMatches = $stmt->fetchAll();
             })
             .then(response => response.json())
             .then(data => {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
+                
                 if (data.error) {
                     alert('Lỗi: ' + data.error);
                 } else {
-                    alert('Cập nhật kết quả thành công!');
-                    location.reload();
+                    showNotification('Cập nhật kết quả thành công!', 'success');
+                    setTimeout(() => {
+                        location.reload();
+                    }, 2000);
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 alert('Có lỗi xảy ra khi lưu kết quả');
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
             });
         });
 
@@ -836,7 +1168,49 @@ $recentMatches = $stmt->fetchAll();
                 document.querySelectorAll('.stat-input').forEach(input => {
                     input.value = 0;
                 });
+                
+                showNotification('Đã reset tất cả dữ liệu', 'info');
             }
+        }
+
+        // Show notification
+        function showNotification(message, type = 'info') {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.className = `alert alert-${type} position-fixed`;
+            notification.style.cssText = `
+                top: 20px;
+                right: 20px;
+                z-index: 9999;
+                min-width: 300px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                animation: slideInRight 0.3s ease-out;
+            `;
+            notification.innerHTML = `
+                <i class="fas fa-${type === 'success' ? 'check' : 'info'}-circle me-2"></i>
+                ${message}
+                <button type="button" class="btn-close" onclick="this.parentElement.remove()"></button>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Auto remove after 3 seconds
+            setTimeout(() => {
+                if (notification.parentElement) {
+                    notification.style.animation = 'slideOutRight 0.3s ease-out forwards';
+                    setTimeout(() => notification.remove(), 300);
+                }
+            }, 3000);
+        }
+
+        // Helper function to restore player items on error
+        function restorePlayerItems(playerItems) {
+            playerItems.forEach(item => {
+                if (item.classList.contains('add-player-item')) {
+                    item.style.opacity = '1';
+                    location.reload(); // Reload to restore original state
+                }
+            });
         }
 
         // Auto-validate input
@@ -862,56 +1236,55 @@ $recentMatches = $stmt->fetchAll();
             if (e.key === 'Escape' && editMode) {
                 toggleEditMode();
             }
+            
+            // Ctrl/Cmd + E to toggle edit mode
+            if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
+                e.preventDefault();
+                const editBtn = document.getElementById('editModeBtn');
+                if (editBtn) {
+                    toggleEditMode();
+                }
+            }
         });
 
-        // Auto-focus first score input
+        
+        // Real-time validation for score inputs - moved inside DOMContentLoaded
         document.addEventListener('DOMContentLoaded', function() {
-            const firstInput = document.getElementById('teamAScore');
-            if (firstInput && <?= $canUpdate && $match['status'] !== 'completed' ? 'true' : 'false' ?>) {
-                firstInput.focus();
-                firstInput.select();
-            }
+            // Real-time validation for score inputs
+            ['teamAScore', 'teamBScore'].forEach(id => {
+                const input = document.getElementById(id);
+                if (input) {
+                    input.addEventListener('input', function() {
+                        if (this.value < 0) this.value = 0;
+                        if (this.value > 20) this.value = 20;
+                    });
+                }
+            });
             
-            // Initialize team balance display
-            updateTeamBalance();
-        });
-
-        // Real-time validation
-        ['teamAScore', 'teamBScore'].forEach(id => {
-            const input = document.getElementById(id);
-            if (input) {
-                input.addEventListener('input', function() {
-                    if (this.value < 0) this.value = 0;
-                    if (this.value > 20) this.value = 20;
+            // Wait for DOM to be fully loaded
+            setTimeout(() => {
+                const dropdowns = document.querySelectorAll('.dropdown-menu');
+                dropdowns.forEach(dropdown => {
+                    dropdown.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                    });
                 });
-            }
+                
+                const firstInput = document.getElementById('teamAScore');
+                if (firstInput && <?= $canUpdate && $match['status'] !== 'completed' ? 'true' : 'false' ?>) {
+                    firstInput.focus();
+                    firstInput.select();
+                }
+                
+                // Initialize team balance display with error handling
+                try {
+                    updateTeamBalance();
+                    updateTeamCounts();
+                } catch (error) {
+                    console.log('Initial balance calculation skipped:', error.message);
+                }
+            }, 100);
         });
-
-        // Add CSS animation for swap effect
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes swapAnimation {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.05); background-color: #e3f2fd; }
-                100% { transform: scale(1); }
-            }
-            
-            .team-section.drop-zone::before {
-                content: "Thả cầu thủ vào đây";
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                background: rgba(40, 167, 69, 0.9);
-                color: white;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-                z-index: 1000;
-                pointer-events: none;
-            }
-        `;
-        document.head.appendChild(style);
     </script>
 </body>
 </html>
