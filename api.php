@@ -372,6 +372,7 @@ function registerPlayer($input) {
     global $pdo;
     
     $playerId = $input['player_id'] ?? null;
+    $playerId = isset($input['player_id']) ? intval($input['player_id']) : null;
     $date = $input['date'] ?? getCurrentDate();
     
     if (!$playerId) {

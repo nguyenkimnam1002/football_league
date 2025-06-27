@@ -673,7 +673,7 @@ $positionStats = $stmt->fetchAll();
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Tên cầu thủ <span class="required">*</span></label>
-                                    <input type="text" class="form-control" name="name" id="edit_name" required maxlength="100">
+                                    <input name="name" id="edit_name" required maxlength="100">
                                 </div>
                                 
                                 <div class="mb-3">
@@ -874,32 +874,32 @@ $positionStats = $stmt->fetchAll();
         document.addEventListener('DOMContentLoaded', function() {
             // Fix Vietnamese font rendering
             const inputs = document.querySelectorAll('input[type="text"], textarea');
-            inputs.forEach(input => {
-                input.style.fontFamily = 'Times New Roman';
-                input.style.fontSize = '14px';
-                input.style.lineHeight = '1.5';
-            });
+            // inputs.forEach(input => {
+            //     input.style.fontFamily = 'Times New Roman';
+            //     input.style.fontSize = '14px';
+            //     input.style.lineHeight = '1.5';
+            // });
             
             // Validate name input - Allow Vietnamese characters
             const nameInputs = document.querySelectorAll('input[name="name"]');
-            nameInputs.forEach(input => {
-                input.addEventListener('input', function() {
-                    // Allow Vietnamese characters, letters, spaces, parentheses
-                    this.value = this.value.replace(/[^a-zA-ZÀ-ỹ\s\(\)\-\.]/g, '');
+            // nameInputs.forEach(input => {
+            //     input.addEventListener('input', function() {
+            //         // Allow Vietnamese characters, letters, spaces, parentheses
+            //         this.value = this.value.replace(/[^a-zA-ZÀ-ỹ\s\(\)\-\.]/g, '');
                     
-                    // Capitalize first letter of each word
-                    this.value = this.value.replace(/\b\w/g, l => l.toUpperCase());
+            //         // Capitalize first letter of each word
+            //         this.value = this.value.replace(/\b\w/g, l => l.toUpperCase());
                     
-                    // Remove multiple spaces
-                    this.value = this.value.replace(/\s+/g, ' ');
-                });
+            //         // Remove multiple spaces
+            //         this.value = this.value.replace(/\s+/g, ' ');
+            //     });
                 
-                // Fix font on focus
-                input.addEventListener('focus', function() {
-                    this.style.fontFamily = 'Times New Roman';
-                    this.style.fontSize = '14px';
-                });
-            });
+            //     // Fix font on focus
+            //     input.addEventListener('focus', function() {
+            //         this.style.fontFamily = 'Times New Roman';
+            //         this.style.fontSize = '14px';
+            //     });
+            // });
 
             // Auto-hide alerts after 5 seconds
             const alerts = document.querySelectorAll('.alert');
