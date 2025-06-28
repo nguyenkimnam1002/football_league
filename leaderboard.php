@@ -217,7 +217,7 @@ $recentMatches = $stmt->fetchAll();
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="register.php">
+                        <a class="nav-link" href="register.php">
                             <i class="fas fa-user-plus"></i> Đăng ký
                         </a>
                     </li>

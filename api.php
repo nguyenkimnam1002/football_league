@@ -95,6 +95,10 @@ try {
         case 'get_all_photos':
             getAllPhotos($input);
             break;
+
+        case 'get_formation_for_export':
+            getFormationForExport($input);
+            break;
             
         default:
             ob_clean();
@@ -835,6 +839,111 @@ function getAllPhotos($input) {
     
     ob_clean();
     echo json_encode(['success' => true, 'photos' => $photos], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getFormationForExport($input) {
+    global $pdo;
+    
+    $matchId = $input['match_id'] ?? null;
+    
+    if (!$matchId) {
+        throw new Exception('Match ID là bắt buộc');
+    }
+    
+    // Get match info
+    $stmt = $pdo->prepare("SELECT * FROM daily_matches WHERE id = ?");
+    $stmt->execute([$matchId]);
+    $match = $stmt->fetch();
+    
+    if (!$match) {
+        throw new Exception('Trận đấu không tồn tại');
+    }
+    
+    // Get participants with player info
+    $stmt = $pdo->prepare("
+        SELECT mp.*, p.name, p.main_position, p.secondary_position, p.main_skill, p.secondary_skill
+        FROM match_participants mp 
+        JOIN players p ON mp.player_id = p.id 
+        WHERE mp.match_id = ?
+        ORDER BY mp.team, mp.assigned_position, p.name
+    ");
+    $stmt->execute([$matchId]);
+    $participants = $stmt->fetchAll();
+    
+    // Group by team and position for formation layout
+    $teamA = [];
+    $teamB = [];
+    $positions = ['Thủ môn', 'Trung vệ', 'Hậu vệ cánh', 'Tiền vệ', 'Tiền đạo'];
+    
+    // Initialize positions
+    foreach ($positions as $pos) {
+        $teamA[$pos] = [];
+        $teamB[$pos] = [];
+    }
+    
+    foreach ($participants as $participant) {
+        $playerData = [
+            'id' => $participant['player_id'],
+            'name' => $participant['name'],
+            'main_position' => $participant['main_position'],
+            'secondary_position' => $participant['secondary_position'],
+            'main_skill' => $participant['main_skill'],
+            'secondary_skill' => $participant['secondary_skill'],
+            'assigned_position' => $participant['assigned_position'],
+            'position_type' => $participant['position_type'],
+            'skill_level' => $participant['skill_level'],
+            'goals' => $participant['goals'],
+            'assists' => $participant['assists'],
+            'points_earned' => $participant['points_earned']
+        ];
+        
+        if ($participant['team'] === 'A') {
+            $teamA[$participant['assigned_position']][] = $playerData;
+        } else {
+            $teamB[$participant['assigned_position']][] = $playerData;
+        }
+    }
+    
+    // Calculate team statistics
+    $teamAStats = [
+        'total_players' => count(array_filter($participants, function($p) { return $p['team'] === 'A'; })),
+        'total_goals' => array_sum(array_column(array_filter($participants, function($p) { return $p['team'] === 'A'; }), 'goals')),
+        'total_assists' => array_sum(array_column(array_filter($participants, function($p) { return $p['team'] === 'A'; }), 'assists')),
+        'skill_distribution' => []
+    ];
+    
+    $teamBStats = [
+        'total_players' => count(array_filter($participants, function($p) { return $p['team'] === 'B'; })),
+        'total_goals' => array_sum(array_column(array_filter($participants, function($p) { return $p['team'] === 'B'; }), 'goals')),
+        'total_assists' => array_sum(array_column(array_filter($participants, function($p) { return $p['team'] === 'B'; }), 'assists')),
+        'skill_distribution' => []
+    ];
+    
+    // Calculate skill distribution
+    $skillLevels = ['Tốt', 'Trung bình', 'Yếu'];
+    foreach ($skillLevels as $skill) {
+        $teamAStats['skill_distribution'][$skill] = count(array_filter($participants, function($p) use ($skill) {
+            return $p['team'] === 'A' && $p['skill_level'] === $skill;
+        }));
+        
+        $teamBStats['skill_distribution'][$skill] = count(array_filter($participants, function($p) use ($skill) {
+            return $p['team'] === 'B' && $p['skill_level'] === $skill;
+        }));
+    }
+    
+    $responseData = [
+        'match' => $match,
+        'teamA' => $teamA,
+        'teamB' => $teamB,
+        'teamAStats' => $teamAStats,
+        'teamBStats' => $teamBStats,
+        'formation_date' => date('d/m/Y', strtotime($match['match_date'])),
+        'is_completed' => $match['status'] === 'completed'
+    ];
+    
+    ob_clean();
+    echo json_encode(['success' => 'Tải dữ liệu đội hình thành công', 'data' => $responseData], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

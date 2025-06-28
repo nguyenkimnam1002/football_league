@@ -250,12 +250,12 @@ $stats = $stmt->fetch();
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link active" href="index.php">
+                        <a class="nav-link" href="index.php">
                             <i class="fas fa-home"></i> Trang chủ
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="register.php">
+                        <a class="nav-link" href="register.php">
                             <i class="fas fa-user-plus"></i> Đăng ký
                         </a>
                     </li>

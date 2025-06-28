@@ -306,12 +306,12 @@ $positionStats = $stmt->fetchAll();
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item">
-                        <a class="nav-link active" href="index.php">
+                        <a class="nav-link" href="index.php">
                             <i class="fas fa-home"></i> Trang chủ
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link active" href="register.php">
+                        <a class="nav-link" href="register.php">
                             <i class="fas fa-user-plus"></i> Đăng ký
                         </a>
                     </li>
@@ -673,7 +673,7 @@ $positionStats = $stmt->fetchAll();
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Tên cầu thủ <span class="required">*</span></label>
-                                    <input name="name" id="edit_name" required maxlength="100">
+                                    <input type="text" class="form-control" name="name" id="edit_name" required maxlength="100">
                                 </div>
                                 
                                 <div class="mb-3">
