@@ -2,27 +2,49 @@
 require_once 'config.php';
 
 $pdo = DB::getInstance();
-$currentMonth = $_GET['month'] ?? date('Y-m');
-$period = $_GET['period'] ?? 'month'; // month, all_time
+$currentMonth = $_GET['month'] ?? date('Y-m'); // Mặc định là tháng hiện tại
+$period = $_GET['period'] ?? 'month'; // Mặc định là theo tháng
 
-// Get available months
-$stmt = $pdo->query("
-    SELECT DISTINCT month 
-    FROM player_stats 
-    ORDER BY month DESC
-");
-$availableMonths = $stmt->fetchAll(PDO::FETCH_COLUMN);
+// Generate available months - all months in current year
+$availableMonths = [];
+$currentYear = date('Y');
+
+// Add all 12 months of current year
+for ($i = 1; $i <= 12; $i++) {
+    $month = sprintf('%04d-%02d', $currentYear, $i);
+    $availableMonths[] = $month;
+}
+
+// Sort months in descending order (newest first)
+rsort($availableMonths);
 
 // Get leaderboard data
 if ($period === 'month') {
+    // Monthly leaderboard: aggregate from match participants for the specific month
     $stmt = $pdo->prepare("
-        SELECT ps.*, p.name, p.main_position,
-               ROUND(ps.points / GREATEST(ps.matches_played, 1), 2) as avg_points,
-               ROUND((ps.wins / GREATEST(ps.matches_played, 1)) * 100, 1) as win_rate
-        FROM player_stats ps 
-        JOIN players p ON ps.player_id = p.id 
-        WHERE ps.month = ? AND ps.matches_played > 0
-        ORDER BY ps.points DESC, ps.wins DESC, ps.goals DESC
+        SELECT 
+            p.id,
+            p.name, 
+            p.main_position,
+            COUNT(mp.id) as matches_played,
+            SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
+                     WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
+                     ELSE 0 END) as wins,
+            SUM(mp.goals) as goals,
+            SUM(mp.assists) as assists,
+            SUM(mp.points_earned) as points,
+            ROUND(SUM(mp.points_earned) / GREATEST(COUNT(mp.id), 1), 2) as avg_points,
+            ROUND((SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
+                            WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
+                            ELSE 0 END) / GREATEST(COUNT(mp.id), 1)) * 100, 1) as win_rate
+        FROM players p 
+        JOIN match_participants mp ON p.id = mp.player_id 
+        JOIN daily_matches dm ON mp.match_id = dm.id 
+        WHERE DATE_FORMAT(dm.match_date, '%Y-%m') = ? 
+          AND dm.status = 'completed'
+        GROUP BY p.id, p.name, p.main_position
+        HAVING matches_played > 0
+        ORDER BY points DESC, wins DESC, goals DESC
     ");
     $stmt->execute([$currentMonth]);
     $leaderboard = $stmt->fetchAll();
@@ -30,25 +52,36 @@ if ($period === 'month') {
     // Get month stats
     $stmt = $pdo->prepare("
         SELECT 
-            COUNT(DISTINCT player_id) as total_players,
-            SUM(matches_played) as total_matches,
-            SUM(goals) as total_goals,
-            SUM(assists) as total_assists,
-            AVG(points) as avg_points
-        FROM player_stats 
-        WHERE month = ?
+            COUNT(DISTINCT mp.player_id) as total_players,
+            COUNT(mp.id) as total_matches,
+            SUM(mp.goals) as total_goals,
+            SUM(mp.assists) as total_assists,
+            AVG(mp.points_earned) as avg_points
+        FROM match_participants mp
+        JOIN daily_matches dm ON mp.match_id = dm.id
+        WHERE DATE_FORMAT(dm.match_date, '%Y-%m') = ?
+          AND dm.status = 'completed'
     ");
     $stmt->execute([$currentMonth]);
     $monthStats = $stmt->fetch();
     
 } else {
+    // All-time leaderboard from players table
     $stmt = $pdo->query("
-        SELECT p.*, 
-               ROUND(p.total_points / GREATEST(p.total_matches, 1), 2) as avg_points,
-               ROUND((p.total_wins / GREATEST(p.total_matches, 1)) * 100, 1) as win_rate
-        FROM players p 
-        WHERE p.total_matches > 0
-        ORDER BY p.total_points DESC, p.total_wins DESC, p.total_goals DESC
+        SELECT 
+            id,
+            name,
+            main_position,
+            total_matches as matches_played,
+            total_wins as wins,
+            total_goals as goals,
+            total_assists as assists,
+            total_points as points,
+            ROUND(total_points / GREATEST(total_matches, 1), 2) as avg_points,
+            ROUND((total_wins / GREATEST(total_matches, 1)) * 100, 1) as win_rate
+        FROM players 
+        WHERE total_matches > 0
+        ORDER BY total_points DESC, total_wins DESC, total_goals DESC
     ");
     $leaderboard = $stmt->fetchAll();
     
@@ -68,25 +101,31 @@ if ($period === 'month') {
 
 // Get top performers by category
 if ($period === 'month') {
-    // Top goal scorer
+    // Top goal scorer for the month
     $stmt = $pdo->prepare("
-        SELECT ps.goals, p.name 
-        FROM player_stats ps 
-        JOIN players p ON ps.player_id = p.id 
-        WHERE ps.month = ? 
-        ORDER BY ps.goals DESC 
+        SELECT SUM(mp.goals) as goals, p.name 
+        FROM match_participants mp 
+        JOIN players p ON mp.player_id = p.id 
+        JOIN daily_matches dm ON mp.match_id = dm.id
+        WHERE DATE_FORMAT(dm.match_date, '%Y-%m') = ?
+          AND dm.status = 'completed'
+        GROUP BY p.id, p.name
+        ORDER BY goals DESC 
         LIMIT 1
     ");
     $stmt->execute([$currentMonth]);
     $topScorer = $stmt->fetch();
     
-    // Top assist maker
+    // Top assist maker for the month
     $stmt = $pdo->prepare("
-        SELECT ps.assists, p.name 
-        FROM player_stats ps 
-        JOIN players p ON ps.player_id = p.id 
-        WHERE ps.month = ? 
-        ORDER BY ps.assists DESC 
+        SELECT SUM(mp.assists) as assists, p.name 
+        FROM match_participants mp 
+        JOIN players p ON mp.player_id = p.id 
+        JOIN daily_matches dm ON mp.match_id = dm.id
+        WHERE DATE_FORMAT(dm.match_date, '%Y-%m') = ?
+          AND dm.status = 'completed'
+        GROUP BY p.id, p.name
+        ORDER BY assists DESC 
         LIMIT 1
     ");
     $stmt->execute([$currentMonth]);
@@ -114,17 +153,27 @@ if ($period === 'month') {
     $topAssist = $stmt->fetch();
 }
 
-// Recent matches
+// Recent matches for this month (if monthly view) or overall
+$matchesWhere = $period === 'month' ? 
+    "WHERE dm.status = 'completed' AND DATE_FORMAT(dm.match_date, '%Y-%m') = ?" : 
+    "WHERE dm.status = 'completed'";
+
 $stmt = $pdo->prepare("
     SELECT dm.*, 
            COUNT(mp.id) as total_players
     FROM daily_matches dm 
     LEFT JOIN match_participants mp ON dm.id = mp.match_id
-    WHERE dm.status = 'completed'
+    $matchesWhere
     GROUP BY dm.id
     ORDER BY dm.match_date DESC 
     LIMIT 5
 ");
+
+if ($period === 'month') {
+    $stmt->execute([$currentMonth]);
+} else {
+    $stmt->execute();
+}
 $recentMatches = $stmt->fetchAll();
 ?>
 
@@ -195,6 +244,13 @@ $recentMatches = $stmt->fetchAll();
         .nav-link {
             font-weight: 500;
         }
+        .month-info {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 10px 15px;
+            color: white;
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body class="gradient-bg">
@@ -260,6 +316,7 @@ $recentMatches = $stmt->fetchAll();
             </div>
         </div>
     </nav>
+    
     <div class="container py-4">
         <!-- Header -->
         <div class="card card-custom mb-4">
@@ -268,7 +325,18 @@ $recentMatches = $stmt->fetchAll();
                     <div class="col-md-6">
                         <h1 class="mb-2">🏆 Bảng xếp hạng</h1>
                         <p class="lead mb-0">
-                            <?= $period === 'month' ? 'Tháng ' . date('m/Y', strtotime($currentMonth . '-01')) : 'Tổng kết' ?>
+                            <?php 
+                            if ($period === 'month') {
+                                $monthTimestamp = strtotime($currentMonth . '-01');
+                                if ($monthTimestamp === false) {
+                                    echo 'Tháng ' . date('m/Y');
+                                } else {
+                                    echo 'Tháng ' . date('m/Y', $monthTimestamp);
+                                }
+                            } else {
+                                echo 'Tổng kết';
+                            }
+                            ?>
                         </p>
                     </div>
                     <div class="col-md-6 text-end">
@@ -305,6 +373,30 @@ $recentMatches = $stmt->fetchAll();
                         </div>
                     <?php endif; ?>
                 </div>
+                
+                <!-- Month Info -->
+                <?php if ($period === 'month'): ?>
+                    <div class="month-info">
+                        <div class="row text-center">
+                            <div class="col-md-3">
+                                <small>Tháng hiện tại:</small>
+                                <div><strong><?= date('m/Y', strtotime($currentMonth . '-01')) ?></strong></div>
+                            </div>
+                            <div class="col-md-3">
+                                <small>Cầu thủ tham gia:</small>
+                                <div><strong><?= $monthStats['total_players'] ?? 0 ?></strong></div>
+                            </div>
+                            <div class="col-md-3">
+                                <small>Tổng trận đấu:</small>
+                                <div><strong><?= $monthStats['total_matches'] ?? 0 ?></strong></div>
+                            </div>
+                            <div class="col-md-3">
+                                <small>Bàn thắng:</small>
+                                <div><strong><?= $monthStats['total_goals'] ?? 0 ?></strong></div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -344,91 +436,111 @@ $recentMatches = $stmt->fetchAll();
                     <div class="card-header">
                         <h5 class="mb-0">
                             <i class="fas fa-medal"></i> 
-                            Bảng xếp hạng <?= $period === 'month' ? 'tháng' : 'tổng kết' ?>
+                            Bảng xếp hạng <?php 
+                            if ($period === 'month') {
+                                $monthTimestamp = strtotime($currentMonth . '-01');
+                                if ($monthTimestamp !== false) {
+                                    echo 'tháng ' . date('m/Y', $monthTimestamp);
+                                } else {
+                                    echo 'tháng ' . date('m/Y');
+                                }
+                            } else {
+                                echo 'tổng kết';
+                            }
+                            ?>
                         </h5>
+                        <?php if (empty($leaderboard)): ?>
+                            <small class="text-muted">(Chưa có dữ liệu cho tháng này)</small>
+                        <?php endif; ?>
                     </div>
                     <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover mb-0">
-                                <thead class="table-dark">
-                                    <tr>
-                                        <th>Hạng</th>
-                                        <th>Cầu thủ</th>
-                                        <th>Vị trí</th>
-                                        <th>Trận</th>
-                                        <th>Thắng</th>
-                                        <th>Tỷ lệ thắng</th>
-                                        <th>Bàn thắng</th>
-                                        <th>Kiến tạo</th>
-                                        <th>Điểm</th>
-                                        <th>TB/trận</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php foreach ($leaderboard as $index => $player): ?>
-                                        <tr class="<?= $index < 3 ? 'rank-' . ($index + 1) : '' ?>">
-                                            <td>
-                                                <div class="rank-medal <?= $index < 3 ? 'rank-' . ($index + 1) : 'bg-light' ?>">
-                                                    <?php if ($index === 0): ?>
-                                                        🥇
-                                                    <?php elseif ($index === 1): ?>
-                                                        🥈
-                                                    <?php elseif ($index === 2): ?>
-                                                        🥉
-                                                    <?php else: ?>
-                                                        <?= $index + 1 ?>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <div class="d-flex align-items-center">
-                                                    <div class="player-avatar me-2">
-                                                        <?= strtoupper(substr($player['name'], 0, 1)) ?>
-                                                    </div>
-                                                    <strong><?= htmlspecialchars($player['name']) ?></strong>
-                                                </div>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-info position-badge">
-                                                    <?= $player['main_position'] ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <?= $period === 'month' ? $player['matches_played'] : $player['total_matches'] ?>
-                                            </td>
-                                            <td>
-                                                <?= $period === 'month' ? $player['wins'] : $player['total_wins'] ?>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-<?= $player['win_rate'] >= 60 ? 'success' : ($player['win_rate'] >= 40 ? 'warning' : 'danger') ?>">
-                                                    <?= $player['win_rate'] ?>%
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-success">
-                                                    <?= $period === 'month' ? $player['goals'] : $player['total_goals'] ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <span class="badge bg-primary">
-                                                    <?= $period === 'month' ? $player['assists'] : $player['total_assists'] ?>
-                                                </span>
-                                            </td>
-                                            <td>
-                                                <strong class="text-success">
-                                                    <?= $period === 'month' ? $player['points'] : $player['total_points'] ?>
-                                                </strong>
-                                            </td>
-                                            <td>
-                                                <span class="text-muted">
-                                                    <?= $player['avg_points'] ?>
-                                                </span>
-                                            </td>
+                        <?php if (empty($leaderboard)): ?>
+                            <div class="text-center py-5">
+                                <i class="fas fa-trophy fa-3x text-muted mb-3"></i>
+                                <h5 class="text-muted">Chưa có dữ liệu xếp hạng</h5>
+                                <p class="text-muted">
+                                    <?= $period === 'month' ? 'Chưa có trận đấu nào được hoàn thành trong tháng này' : 'Chưa có cầu thủ nào thi đấu' ?>
+                                </p>
+                            </div>
+                        <?php else: ?>
+                            <div class="table-responsive">
+                                <table class="table table-hover mb-0">
+                                    <thead class="table-dark">
+                                        <tr>
+                                            <th>Hạng</th>
+                                            <th>Cầu thủ</th>
+                                            <th>Vị trí</th>
+                                            <th>Trận</th>
+                                            <th>Thắng</th>
+                                            <th>Tỷ lệ thắng</th>
+                                            <th>Bàn thắng</th>
+                                            <th>Kiến tạo</th>
+                                            <th>Điểm</th>
+                                            <th>TB/trận</th>
                                         </tr>
-                                    <?php endforeach; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($leaderboard as $index => $player): ?>
+                                            <tr class="<?= $index < 3 ? 'rank-' . ($index + 1) : '' ?>">
+                                                <td>
+                                                    <div class="rank-medal <?= $index < 3 ? 'rank-' . ($index + 1) : 'bg-light' ?>">
+                                                        <?php if ($index === 0): ?>
+                                                            🥇
+                                                        <?php elseif ($index === 1): ?>
+                                                            🥈
+                                                        <?php elseif ($index === 2): ?>
+                                                            🥉
+                                                        <?php else: ?>
+                                                            <?= $index + 1 ?>
+                                                        <?php endif; ?>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div class="d-flex align-items-center">
+                                                        <div class="player-avatar me-2">
+                                                            <?= strtoupper(substr($player['name'], 0, 1)) ?>
+                                                        </div>
+                                                        <strong><?= htmlspecialchars($player['name']) ?></strong>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-info position-badge">
+                                                        <?= formatPosition($player['main_position']) ?>
+                                                    </span>
+                                                </td>
+                                                <td><?= $player['matches_played'] ?></td>
+                                                <td><?= $player['wins'] ?></td>
+                                                <td>
+                                                    <span class="badge bg-<?= $player['win_rate'] >= 60 ? 'success' : ($player['win_rate'] >= 40 ? 'warning' : 'danger') ?>">
+                                                        <?= $player['win_rate'] ?>%
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-success">
+                                                        <?= $player['goals'] ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <span class="badge bg-primary">
+                                                        <?= $player['assists'] ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <strong class="text-success">
+                                                        <?= $player['points'] ?>
+                                                    </strong>
+                                                </td>
+                                                <td>
+                                                    <span class="text-muted">
+                                                        <?= $player['avg_points'] ?>
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -443,7 +555,7 @@ $recentMatches = $stmt->fetchAll();
                         </h6>
                     </div>
                     <div class="card-body">
-                        <?php if ($topScorer): ?>
+                        <?php if ($topScorer && $topScorer['goals'] > 0): ?>
                             <div class="mb-3">
                                 <h6 class="text-success">⚽ Vua phá lưới</h6>
                                 <div class="d-flex justify-content-between">
@@ -453,7 +565,7 @@ $recentMatches = $stmt->fetchAll();
                             </div>
                         <?php endif; ?>
                         
-                        <?php if ($topAssist): ?>
+                        <?php if ($topAssist && $topAssist['assists'] > 0): ?>
                             <div class="mb-3">
                                 <h6 class="text-primary">🎯 Vua kiến tạo</h6>
                                 <div class="d-flex justify-content-between">
@@ -468,10 +580,15 @@ $recentMatches = $stmt->fetchAll();
                                 <h6 class="text-warning">👑 Vua điểm số</h6>
                                 <div class="d-flex justify-content-between">
                                     <span><?= htmlspecialchars($leaderboard[0]['name']) ?></span>
-                                    <strong>
-                                        <?= $period === 'month' ? $leaderboard[0]['points'] : $leaderboard[0]['total_points'] ?> điểm
-                                    </strong>
+                                    <strong><?= $leaderboard[0]['points'] ?> điểm</strong>
                                 </div>
+                            </div>
+                        <?php endif; ?>
+                        
+                        <?php if (empty($topScorer) && empty($topAssist) && empty($leaderboard)): ?>
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-info-circle mb-2"></i>
+                                <p class="mb-0">Chưa có dữ liệu thành tích</p>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -481,36 +598,46 @@ $recentMatches = $stmt->fetchAll();
                 <div class="card card-custom">
                     <div class="card-header">
                         <h6 class="mb-0">
-                            <i class="fas fa-history"></i> Kết quả gần đây
+                            <i class="fas fa-history"></i> 
+                            <?= $period === 'month' ? 'Kết quả tháng này' : 'Kết quả gần đây' ?>
                         </h6>
                     </div>
                     <div class="card-body">
-                        <?php foreach ($recentMatches as $match): ?>
-                            <div class="mb-3 p-2 border rounded">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <span class="fw-bold">
-                                        <?= date('d/m', strtotime($match['match_date'])) ?>
-                                    </span>
-                                    <div class="text-center">
-                                        <span class="badge bg-danger"><?= $match['team_a_score'] ?></span>
-                                        -
-                                        <span class="badge bg-primary"><?= $match['team_b_score'] ?></span>
+                        <?php if (!empty($recentMatches)): ?>
+                            <?php foreach ($recentMatches as $match): ?>
+                                <div class="mb-3 p-2 border rounded">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="fw-bold">
+                                            <?= date('d/m', strtotime($match['match_date'])) ?>
+                                        </span>
+                                        <div class="text-center">
+                                            <span class="badge bg-danger"><?= $match['team_a_score'] ?></span>
+                                            -
+                                            <span class="badge bg-primary"><?= $match['team_b_score'] ?></span>
+                                        </div>
+                                        <small class="text-muted">
+                                            <?= $match['total_players'] ?> người
+                                        </small>
                                     </div>
-                                    <small class="text-muted">
-                                        <?= $match['total_players'] ?> người
-                                    </small>
+                                    <div class="text-center mt-1">
+                                        <?php
+                                        $winner = $match['team_a_score'] > $match['team_b_score'] ? 'Đội A thắng' : 
+                                                 ($match['team_b_score'] > $match['team_a_score'] ? 'Đội B thắng' : 'Hòa');
+                                        ?>
+                                        <small class="text-muted"><?= $winner ?></small>
+                                    </div>
                                 </div>
-                                <div class="text-center mt-1">
-                                    <?php
-                                    $winner = $match['team_a_score'] > $match['team_b_score'] ? 'Đội A thắng' : 
-                                             ($match['team_b_score'] > $match['team_a_score'] ? 'Đội B thắng' : 'Hòa');
-                                    ?>
-                                    <small class="text-muted"><?= $winner ?></small>
-                                </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="text-center text-muted py-3">
+                                <i class="fas fa-calendar-times fa-2x mb-2"></i>
+                                <p class="mb-0">
+                                    <?= $period === 'month' ? 'Chưa có trận đấu nào trong tháng này' : 'Chưa có trận đấu nào' ?>
+                                </p>
                             </div>
-                        <?php endforeach; ?>
+                        <?php endif; ?>
                         
-                        <a href="match_result.php" class="btn btn-outline-primary btn-sm w-100">
+                        <a href="history.php" class="btn btn-outline-primary btn-sm w-100 mt-2">
                             <i class="fas fa-list"></i> Xem tất cả
                         </a>
                     </div>
@@ -544,7 +671,9 @@ $recentMatches = $stmt->fetchAll();
         // Auto-refresh every 5 minutes if viewing current month
         <?php if ($period === 'month' && $currentMonth === date('Y-m')): ?>
             setInterval(function() {
-                location.reload();
+                if (document.visibilityState === 'visible') {
+                    location.reload();
+                }
             }, 300000); // 5 minutes
         <?php endif; ?>
 
@@ -580,6 +709,22 @@ $recentMatches = $stmt->fetchAll();
             if (e.key === 'h' || e.key === 'H') {
                 window.location.href = 'index.php';
             }
+            
+            // Arrow keys to navigate months
+            if (e.key === 'ArrowLeft' && document.getElementById('monthSelect')) {
+                const select = document.getElementById('monthSelect');
+                if (select.selectedIndex > 0) {
+                    select.selectedIndex--;
+                    select.dispatchEvent(new Event('change'));
+                }
+            }
+            if (e.key === 'ArrowRight' && document.getElementById('monthSelect')) {
+                const select = document.getElementById('monthSelect');
+                if (select.selectedIndex < select.options.length - 1) {
+                    select.selectedIndex++;
+                    select.dispatchEvent(new Event('change'));
+                }
+            }
         });
 
         // Highlight player row on hover
@@ -598,6 +743,115 @@ $recentMatches = $stmt->fetchAll();
         document.querySelectorAll('.badge').forEach(badge => {
             badge.title = badge.textContent;
         });
+
+        // Show info for months without data (không có nút "Xem tháng hiện tại")
+        document.addEventListener('DOMContentLoaded', function() {
+            const currentMonth = '<?= date('Y-m') ?>';
+            const selectedMonth = '<?= $currentMonth ?>';
+            
+            // Check if selected month has data
+            const hasData = <?= !empty($leaderboard) ? 'true' : 'false' ?>;
+            
+            if (!hasData) {
+                // Show info message for months without data
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'alert alert-info mt-3';
+                infoDiv.innerHTML = `
+                    <i class="fas fa-info-circle"></i> 
+                    Tháng ${selectedMonth.split('-')[1]}/${selectedMonth.split('-')[0]} chưa có dữ liệu trận đấu hoàn thành.
+                `;
+                
+                const cardBody = document.querySelector('.month-info');
+                if (cardBody) {
+                    cardBody.appendChild(infoDiv);
+                }
+            }
+        });
+
+        // Export functionality
+        function exportLeaderboard() {
+            const leaderboard = <?= json_encode($leaderboard) ?>;
+            const period = '<?= $period ?>';
+            const month = '<?= $currentMonth ?>';
+            
+            let csv = '\uFEFFHạng,Tên,Vị trí,Trận,Thắng,Tỷ lệ thắng (%),Bàn thắng,Kiến tạo,Điểm,TB/trận\n';
+            
+            leaderboard.forEach((player, index) => {
+                csv += `${index + 1},"${player.name}","${player.main_position}",${player.matches_played},${player.wins},${player.win_rate},${player.goals},${player.assists},${player.points},${player.avg_points}\n`;
+            });
+
+            const filename = period === 'month' ? 
+                `bang_xep_hang_thang_${month.replace('-', '_')}.csv` : 
+                `bang_xep_hang_tong_ket.csv`;
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Add export button if there's data
+        <?php if (!empty($leaderboard)): ?>
+        document.addEventListener('DOMContentLoaded', function() {
+            const cardHeader = document.querySelector('.card-custom .card-header h5');
+            if (cardHeader) {
+                const exportBtn = document.createElement('button');
+                exportBtn.className = 'btn btn-sm btn-outline-info ms-2';
+                exportBtn.innerHTML = '<i class="fas fa-download"></i> Xuất Excel';
+                exportBtn.onclick = exportLeaderboard;
+                cardHeader.parentElement.appendChild(exportBtn);
+            }
+        });
+        <?php endif; ?>
+
+        // Performance monitoring
+        window.addEventListener('load', function() {
+            const loadTime = performance.now();
+            console.log(`Leaderboard loaded in ${Math.round(loadTime)}ms`);
+        });
+
+        // Mobile swipe navigation for months
+        let startX = 0;
+        let startY = 0;
+
+        document.addEventListener('touchstart', function(e) {
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+        }, { passive: true });
+
+        document.addEventListener('touchend', function(e) {
+            if (!startX || !startY) return;
+            
+            const endX = e.changedTouches[0].clientX;
+            const endY = e.changedTouches[0].clientY;
+            
+            const diffX = startX - endX;
+            const diffY = startY - endY;
+            
+            // Only handle horizontal swipes
+            if (Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > 50) {
+                const monthSelect = document.getElementById('monthSelect');
+                if (monthSelect && '<?= $period ?>' === 'month') {
+                    if (diffX > 0 && monthSelect.selectedIndex < monthSelect.options.length - 1) {
+                        // Swipe left - next month
+                        monthSelect.selectedIndex++;
+                        monthSelect.dispatchEvent(new Event('change'));
+                    } else if (diffX < 0 && monthSelect.selectedIndex > 0) {
+                        // Swipe right - previous month  
+                        monthSelect.selectedIndex--;
+                        monthSelect.dispatchEvent(new Event('change'));
+                    }
+                }
+            }
+            
+            startX = 0;
+            startY = 0;
+        }, { passive: true });
     </script>
 </body>
 </html>
