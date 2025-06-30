@@ -125,3 +125,12 @@ INSERT INTO system_config (config_key, config_value, description) VALUES
 ('min_players', '14', 'Số cầu thủ tối thiểu để chia đội'),
 ('points_win', '3', 'Điểm thưởng khi thắng'),
 ('points_lose', '0', 'Điểm khi thua');
+
+-- Thêm cột total_draws vào bảng players
+ALTER TABLE players ADD COLUMN total_draws INT DEFAULT 0 AFTER total_wins;
+
+-- Cập nhật dữ liệu existing (tính toán số trận hòa)
+-- total_draws = total_matches - total_wins - total_losses
+-- Giả sử total_losses = total_matches - total_wins - total_draws
+-- Tạm thời set total_draws = 0 cho dữ liệu hiện tại
+UPDATE players SET total_draws = 0 WHERE total_draws IS NULL;

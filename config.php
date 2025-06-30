@@ -156,4 +156,26 @@ function successResponse($message, $data = null) {
     }
     jsonResponse($response);
 }
+
+/**
+ * Tính số trận thua
+ */
+function calculateLosses($totalMatches, $wins, $draws) {
+    return max(0, $totalMatches - $wins - $draws);
+}
+
+/**
+ * Format thống kê thắng-hòa-thua
+ */
+function formatWinDrawLoss($wins, $draws, $losses) {
+    return "{$wins}-{$draws}-{$losses}";
+}
+
+/**
+ * Tính tỷ lệ thắng phần trăm
+ */
+function calculateWinRate($wins, $totalMatches) {
+    if ($totalMatches == 0) return 0;
+    return round(($wins / $totalMatches) * 100, 1);
+}
 ?>

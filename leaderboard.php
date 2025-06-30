@@ -20,7 +20,6 @@ rsort($availableMonths);
 
 // Get leaderboard data
 if ($period === 'month') {
-    // Monthly leaderboard: aggregate from match participants for the specific month
     $stmt = $pdo->prepare("
         SELECT 
             p.id,
@@ -30,6 +29,10 @@ if ($period === 'month') {
             SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
                      WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
                      ELSE 0 END) as wins,
+            SUM(CASE WHEN dm.team_a_score = dm.team_b_score THEN 1 ELSE 0 END) as draws,
+            SUM(CASE WHEN dm.team_a_score < dm.team_b_score AND mp.team = 'A' THEN 1 
+                     WHEN dm.team_b_score < dm.team_a_score AND mp.team = 'B' THEN 1 
+                     ELSE 0 END) as losses,
             SUM(mp.goals) as goals,
             SUM(mp.assists) as assists,
             SUM(mp.points_earned) as points,
@@ -48,25 +51,8 @@ if ($period === 'month') {
     ");
     $stmt->execute([$currentMonth]);
     $leaderboard = $stmt->fetchAll();
-    
-    // Get month stats
-    $stmt = $pdo->prepare("
-        SELECT 
-            COUNT(DISTINCT mp.player_id) as total_players,
-            COUNT(mp.id) as total_matches,
-            SUM(mp.goals) as total_goals,
-            SUM(mp.assists) as total_assists,
-            AVG(mp.points_earned) as avg_points
-        FROM match_participants mp
-        JOIN daily_matches dm ON mp.match_id = dm.id
-        WHERE DATE_FORMAT(dm.match_date, '%Y-%m') = ?
-          AND dm.status = 'completed'
-    ");
-    $stmt->execute([$currentMonth]);
-    $monthStats = $stmt->fetch();
-    
 } else {
-    // All-time leaderboard from players table
+    // ALL-TIME LEADERBOARD - CẬP NHẬT ĐỂ THÊM total_draws
     $stmt = $pdo->query("
         SELECT 
             id,
@@ -74,6 +60,8 @@ if ($period === 'month') {
             main_position,
             total_matches as matches_played,
             total_wins as wins,
+            total_draws as draws,
+            (total_matches - total_wins - total_draws) as losses,
             total_goals as goals,
             total_assists as assists,
             total_points as points,
@@ -84,19 +72,6 @@ if ($period === 'month') {
         ORDER BY total_points DESC, total_wins DESC, total_goals DESC
     ");
     $leaderboard = $stmt->fetchAll();
-    
-    // Get overall stats
-    $stmt = $pdo->query("
-        SELECT 
-            COUNT(*) as total_players,
-            SUM(total_matches) as total_matches,
-            SUM(total_goals) as total_goals,
-            SUM(total_assists) as total_assists,
-            AVG(total_points) as avg_points
-        FROM players 
-        WHERE total_matches > 0
-    ");
-    $monthStats = $stmt->fetch();
 }
 
 // Get top performers by category
@@ -465,13 +440,13 @@ $recentMatches = $stmt->fetchAll();
                         <?php else: ?>
                             <div class="table-responsive">
                                 <table class="table table-hover mb-0">
-                                    <thead class="table-dark">
+                                   <thead class="table-dark">
                                         <tr>
                                             <th>Hạng</th>
                                             <th>Cầu thủ</th>
                                             <th>Vị trí</th>
                                             <th>Trận</th>
-                                            <th>Thắng</th>
+                                            <th>T-H-T</th> <!-- THAY ĐỔI TỪ "Thắng" THÀNH "T-H-T" -->
                                             <th>Tỷ lệ thắng</th>
                                             <th>Bàn thắng</th>
                                             <th>Kiến tạo</th>
@@ -509,7 +484,12 @@ $recentMatches = $stmt->fetchAll();
                                                     </span>
                                                 </td>
                                                 <td><?= $player['matches_played'] ?></td>
-                                                <td><?= $player['wins'] ?></td>
+                                                <td>
+                                                    <!-- THAY ĐỔI: HIỂN THỊ THẮNG-HÒA-THUA -->
+                                                    <span class="badge bg-<?= $player['win_rate'] >= 60 ? 'success' : ($player['win_rate'] >= 40 ? 'warning' : 'danger') ?>">
+                                                        <?= $player['wins'] ?>-<?= $player['draws'] ?>-<?= $player['losses'] ?>
+                                                    </span>
+                                                </td>
                                                 <td>
                                                     <span class="badge bg-<?= $player['win_rate'] >= 60 ? 'success' : ($player['win_rate'] >= 40 ? 'warning' : 'danger') ?>">
                                                         <?= $player['win_rate'] ?>%
@@ -768,16 +748,18 @@ $recentMatches = $stmt->fetchAll();
             }
         });
 
-        // Export functionality
+        // Export functionality        
+        // Cập nhật function exportLeaderboard trong leaderboard.php (phần JavaScript)
         function exportLeaderboard() {
             const leaderboard = <?= json_encode($leaderboard) ?>;
             const period = '<?= $period ?>';
             const month = '<?= $currentMonth ?>';
             
-            let csv = '\uFEFFHạng,Tên,Vị trí,Trận,Thắng,Tỷ lệ thắng (%),Bàn thắng,Kiến tạo,Điểm,TB/trận\n';
+            // CẬP NHẬT HEADER CSV
+            let csv = '\uFEFFHạng,Tên,Vị trí,Trận,Thắng,Hòa,Thua,Tỷ lệ thắng (%),Bàn thắng,Kiến tạo,Điểm,TB/trận\n';
             
             leaderboard.forEach((player, index) => {
-                csv += `${index + 1},"${player.name}","${player.main_position}",${player.matches_played},${player.wins},${player.win_rate},${player.goals},${player.assists},${player.points},${player.avg_points}\n`;
+                csv += `${index + 1},"${player.name}","${player.main_position}",${player.matches_played},${player.wins},${player.draws},${player.losses},${player.win_rate},${player.goals},${player.assists},${player.points},${player.avg_points}\n`;
             });
 
             const filename = period === 'month' ? 

@@ -520,6 +520,7 @@ function updateMatchResult($input) {
         
         // Determine winning team
         $winningTeam = $teamAScore > $teamBScore ? 'A' : ($teamBScore > $teamAScore ? 'B' : null);
+        $isDraw = ($teamAScore == $teamBScore);
         
         // Update match result
         $stmt = $pdo->prepare("
@@ -546,11 +547,13 @@ function updateMatchResult($input) {
             WHERE id = ?
         ");
         
+        // CẬP NHẬT QUERY ĐỂ THÊM total_draws
         $updatePlayerStmt = $pdo->prepare("
             UPDATE players 
             SET total_points = total_points + ?, 
                 total_matches = total_matches + 1,
                 total_wins = total_wins + ?,
+                total_draws = total_draws + ?,
                 total_goals = total_goals + ?,
                 total_assists = total_assists + ?
             WHERE id = ?
@@ -561,23 +564,26 @@ function updateMatchResult($input) {
             $goals = $playerStats[$playerId]['goals'] ?? 0;
             $assists = $playerStats[$playerId]['assists'] ?? 0;
             
-            // Calculate points (3 for win, 0 for loss, 1 for draw)
+            // Calculate points (3 for win, 1 for draw, 0 for loss)
             $points = 0;
-            if ($winningTeam === null) {
+            $isWin = 0;
+            $isDraw_player = 0;
+            
+            if ($isDraw) {
                 $points = 1; // Draw
+                $isDraw_player = 1;
             } elseif ($participant['team'] === $winningTeam) {
                 $points = POINTS_WIN; // Win
+                $isWin = 1;
             } else {
                 $points = POINTS_LOSE; // Loss
             }
             
-            $isWin = ($winningTeam !== null && $participant['team'] === $winningTeam) ? 1 : 0;
-            
             // Update match_participants
             $updateParticipantStmt->execute([$goals, $assists, $points, $participant['id']]);
             
-            // Update players total stats
-            $updatePlayerStmt->execute([$points, $isWin, $goals, $assists, $playerId]);
+            // Update players total stats - THÊM $isDraw_player
+            $updatePlayerStmt->execute([$points, $isWin, $isDraw_player, $goals, $assists, $playerId]);
         }
         
         $pdo->commit();
