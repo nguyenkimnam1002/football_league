@@ -690,9 +690,30 @@ if ($row = $result->fetch()) {
                                 <i class="fas fa-trophy"></i> Bảng xếp hạng
                             </a>
                             <!-- NÚT MỚI - XUẤT ĐỘI HÌNH -->
-                            <button class="btn btn-outline-info" onclick="showFormationPreview()" title="Xuất đội hình">
+                            <!-- <button class="btn btn-outline-info" onclick="showFormationPreview()" title="Xuất đội hình">
+                                <i class="fas fa-download"></i> Xuất đội hình
+                            </button> -->
+                             <button type="button" class="btn btn-outline-info dropdown-toggle" data-bs-toggle="dropdown" title="Xuất đội hình">
                                 <i class="fas fa-download"></i> Xuất đội hình
                             </button>
+                            <ul class="dropdown-menu">
+                                <li><h6 class="dropdown-header">📋 Định dạng đơn giản</h6></li>
+                                <li><a class="dropdown-item" href="simple_export.php?match_id=<?= $matchId ?>&format=html" target="_blank">
+                                    <i class="fas fa-print text-primary"></i> In PDF (bảng đơn giản)
+                                </a></li>
+                                <li><a class="dropdown-item" href="simple_export.php?match_id=<?= $matchId ?>&format=csv">
+                                    <i class="fas fa-file-csv text-success"></i> Tải CSV (Excel)
+                                </a></li>
+                                <li><hr class="dropdown-divider"></li>
+                                <li><h6 class="dropdown-header">🎨 Định dạng đẹp</h6></li>
+                                <li><a class="dropdown-item" href="#" onclick="showFormationPreview()">
+                                    <i class="fas fa-image text-warning"></i> Xuất ảnh đội hình
+                                </a></li>
+                            </ul>
+                        </div>
+                        <!-- DROPDOWN XUẤT ĐỘI HÌNH -->
+                        <div class="btn-group">
+                           
                         </div>
                     </div>
                 </div>
