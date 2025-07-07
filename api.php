@@ -99,6 +99,10 @@ try {
         case 'get_formation_for_export':
             getFormationForExport($input);
             break;
+
+        case 'fix_existing_points':
+            fixExistingPoints($input);
+            break;
             
         default:
             ob_clean();
@@ -486,6 +490,8 @@ function divideTeams($input) {
     }
 }
 
+// Cập nhật function updateMatchResult trong api.php
+
 function updateMatchResult($input) {
     global $pdo;
     
@@ -530,9 +536,9 @@ function updateMatchResult($input) {
         ");
         $stmt->execute([$teamAScore, $teamBScore, $matchId]);
         
-        // Get all participants
+        // Get all participants with special player info
         $stmt = $pdo->prepare("
-            SELECT mp.*, p.name 
+            SELECT mp.*, p.name, p.is_special_player
             FROM match_participants mp 
             JOIN players p ON mp.player_id = p.id 
             WHERE mp.match_id = ?
@@ -540,14 +546,14 @@ function updateMatchResult($input) {
         $stmt->execute([$matchId]);
         $participants = $stmt->fetchAll();
         
-        // Update participant stats and points
+        // Update participant stats and points - SỬ DỤNG DECIMAL
         $updateParticipantStmt = $pdo->prepare("
             UPDATE match_participants 
             SET goals = ?, assists = ?, points_earned = ?
             WHERE id = ?
         ");
         
-        // CẬP NHẬT QUERY ĐỂ THÊM total_draws
+        // Update player total stats - SỬ DỤNG DECIMAL
         $updatePlayerStmt = $pdo->prepare("
             UPDATE players 
             SET total_points = total_points + ?, 
@@ -561,29 +567,43 @@ function updateMatchResult($input) {
         
         foreach ($participants as $participant) {
             $playerId = $participant['player_id'];
-            $goals = $playerStats[$playerId]['goals'] ?? 0;
-            $assists = $playerStats[$playerId]['assists'] ?? 0;
+            $goals = intval($playerStats[$playerId]['goals'] ?? 0);
+            $assists = intval($playerStats[$playerId]['assists'] ?? 0);
+            $isSpecialPlayer = (bool) $participant['is_special_player'];
             
-            // Calculate points (3 for win, 1 for draw, 0 for loss)
-            $points = 0;
+            // Determine match result for this player
             $isWin = 0;
             $isDraw_player = 0;
             
             if ($isDraw) {
-                $points = 1; // Draw
                 $isDraw_player = 1;
             } elseif ($participant['team'] === $winningTeam) {
-                $points = POINTS_WIN; // Win
                 $isWin = 1;
-            } else {
-                $points = POINTS_LOSE; // Loss
             }
             
-            // Update match_participants
-            $updateParticipantStmt->execute([$goals, $assists, $points, $participant['id']]);
+            // Calculate points based on player type - SỬ DỤNG FLOAT
+            $points = calculatePoints($isWin, $isDraw_player, $isSpecialPlayer);
             
-            // Update players total stats - THÊM $isDraw_player
-            $updatePlayerStmt->execute([$points, $isWin, $isDraw_player, $goals, $assists, $playerId]);
+            // Log để debug
+            error_log("Player {$participant['name']}: isSpecial={$isSpecialPlayer}, isWin={$isWin}, isDraw={$isDraw_player}, points={$points}");
+            
+            // Update match_participants - SỬ DỤNG FLOAT CHÍNH XÁC
+            $updateParticipantStmt->execute([
+                $goals, 
+                $assists, 
+                $points,  // Điểm thập phân chính xác
+                $participant['id']
+            ]);
+            
+            // Update players total stats - SỬ DỤNG FLOAT CHÍNH XÁC
+            $updatePlayerStmt->execute([
+                $points,  // Điểm thập phân chính xác
+                $isWin, 
+                $isDraw_player, 
+                $goals, 
+                $assists, 
+                $playerId
+            ]);
         }
         
         $pdo->commit();
@@ -595,6 +615,89 @@ function updateMatchResult($input) {
     } catch (Exception $e) {
         $pdo->rollBack();
         throw new Exception('Lỗi khi cập nhật kết quả: ' . $e->getMessage());
+    }
+}
+
+// THÊM FUNCTION MỚI ĐỂ FIX DỮ LIỆU CŨ
+function fixExistingPoints($input) {
+    global $pdo;
+    
+    try {
+        $pdo->beginTransaction();
+        
+        // Reset tất cả điểm về 0
+        $pdo->query("UPDATE players SET total_points = 0.00");
+        $pdo->query("UPDATE match_participants SET points_earned = 0.00");
+        
+        // Lấy tất cả trận đấu đã hoàn thành
+        $stmt = $pdo->query("
+            SELECT dm.*, mp.*, p.is_special_player, p.name
+            FROM daily_matches dm
+            JOIN match_participants mp ON dm.id = mp.match_id
+            JOIN players p ON mp.player_id = p.id
+            WHERE dm.status = 'completed'
+            ORDER BY dm.match_date, dm.id
+        ");
+        $allMatches = $stmt->fetchAll();
+        
+        // Group by match
+        $matchesGrouped = [];
+        foreach ($allMatches as $row) {
+            $matchesGrouped[$row['match_id']][] = $row;
+        }
+        
+        foreach ($matchesGrouped as $matchId => $participants) {
+            $firstParticipant = $participants[0];
+            $teamAScore = $firstParticipant['team_a_score'];
+            $teamBScore = $firstParticipant['team_b_score'];
+            
+            $winningTeam = $teamAScore > $teamBScore ? 'A' : ($teamBScore > $teamAScore ? 'B' : null);
+            $isDraw = ($teamAScore == $teamBScore);
+            
+            foreach ($participants as $participant) {
+                $isSpecialPlayer = (bool) $participant['is_special_player'];
+                
+                $isWin = 0;
+                $isDraw_player = 0;
+                
+                if ($isDraw) {
+                    $isDraw_player = 1;
+                } elseif ($participant['team'] === $winningTeam) {
+                    $isWin = 1;
+                }
+                
+                // Tính điểm chính xác
+                $correctPoints = calculatePoints($isWin, $isDraw_player, $isSpecialPlayer);
+                
+                // Update match_participants
+                $updateStmt = $pdo->prepare("
+                    UPDATE match_participants 
+                    SET points_earned = ? 
+                    WHERE id = ?
+                ");
+                $updateStmt->execute([$correctPoints, $participant['id']]);
+                
+                // Update players total_points
+                $updatePlayerStmt = $pdo->prepare("
+                    UPDATE players 
+                    SET total_points = total_points + ?
+                    WHERE id = ?
+                ");
+                $updatePlayerStmt->execute([$correctPoints, $participant['player_id']]);
+                
+                error_log("Fixed: {$participant['name']} - Special: {$isSpecialPlayer} - Points: {$correctPoints}");
+            }
+        }
+        
+        $pdo->commit();
+        
+        ob_clean();
+        echo json_encode(['success' => 'Đã fix tất cả điểm số thành công'], JSON_UNESCAPED_UNICODE);
+        exit;
+        
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        throw new Exception('Lỗi khi fix điểm số: ' . $e->getMessage());
     }
 }
 

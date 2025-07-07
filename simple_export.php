@@ -394,11 +394,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         
         // Get participants
         $stmt = $pdo->prepare("
-            SELECT mp.*, p.name, p.main_position, p.total_matches
-            FROM match_participants mp 
-            JOIN players p ON mp.player_id = p.id 
-            WHERE mp.match_id = ?
-            ORDER BY mp.team, mp.assigned_position, p.name
+            select mp.team,
+                mp.assigned_position,
+                mp.position_type,
+                mp.skill_level, COUNT(mp2.id) as total_matches ,p.name, p.main_position
+            from players p 
+           	    LEFT JOIN match_participants mp ON p.id = mp.player_id 
+                LEFT JOIN match_participants mp2 on mp.player_id = mp2.player_id
+                LEFT JOIN daily_matches dm ON mp.match_id = dm.id 
+            where mp.match_id = ?    
+                AND dm.status = 'completed'          
+            group by mp.team,
+                mp.assigned_position,
+                mp.position_type,
+                mp.skill_level,p.name, p.main_position
         ");
         $stmt->execute([$matchId]);
         $participants = $stmt->fetchAll();

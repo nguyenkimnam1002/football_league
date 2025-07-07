@@ -41,8 +41,8 @@ if ($period === 'month') {
                             WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
                             ELSE 0 END) / GREATEST(COUNT(mp.id), 1)) * 100, 1) as win_rate
         FROM players p 
-        JOIN match_participants mp ON p.id = mp.player_id 
-        JOIN daily_matches dm ON mp.match_id = dm.id 
+            LEFT JOIN match_participants mp ON p.id = mp.player_id 
+            LEFT JOIN daily_matches dm ON mp.match_id = dm.id 
         WHERE DATE_FORMAT(dm.match_date, '%Y-%m') = ? 
           AND dm.status = 'completed'
         GROUP BY p.id, p.name, p.main_position
@@ -54,22 +54,33 @@ if ($period === 'month') {
 } else {
     // ALL-TIME LEADERBOARD - CẬP NHẬT ĐỂ THÊM total_draws
     $stmt = $pdo->query("
+        
         SELECT 
-            id,
-            name,
-            main_position,
-            total_matches as matches_played,
-            total_wins as wins,
-            total_draws as draws,
-            (total_matches - total_wins - total_draws) as losses,
-            total_goals as goals,
-            total_assists as assists,
-            total_points as points,
-            ROUND(total_points / GREATEST(total_matches, 1), 2) as avg_points,
-            ROUND((total_wins / GREATEST(total_matches, 1)) * 100, 1) as win_rate
-        FROM players 
-        WHERE total_matches > 0
-        ORDER BY total_points DESC, total_wins DESC, total_goals DESC
+            p.id,
+            p.name, 
+            p.main_position,
+            COUNT(mp.id) as matches_played,
+            SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
+                     WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
+                     ELSE 0 END) as wins,
+            SUM(CASE WHEN dm.team_a_score = dm.team_b_score THEN 1 ELSE 0 END) as draws,
+            SUM(CASE WHEN dm.team_a_score < dm.team_b_score AND mp.team = 'A' THEN 1 
+                     WHEN dm.team_b_score < dm.team_a_score AND mp.team = 'B' THEN 1 
+                     ELSE 0 END) as losses,
+            SUM(mp.goals) as goals,
+            SUM(mp.assists) as assists,
+            SUM(mp.points_earned) as points,
+            ROUND(SUM(mp.points_earned) / GREATEST(COUNT(mp.id), 1), 2) as avg_points,
+            ROUND((SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
+                            WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
+                            ELSE 0 END) / GREATEST(COUNT(mp.id), 1)) * 100, 1) as win_rate
+        FROM players p 
+            LEFT JOIN match_participants mp ON p.id = mp.player_id 
+            LEFT JOIN daily_matches dm ON mp.match_id = dm.id 
+        WHERE 1=1
+          AND dm.status = 'completed'
+        GROUP BY p.id, p.name, p.main_position
+        ORDER BY points DESC, wins DESC, goals DESC
     ");
     $leaderboard = $stmt->fetchAll();
 }

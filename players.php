@@ -1,162 +1,130 @@
 <?php
-// Set UTF-8 encoding
-header('Content-Type: text/html; charset=utf-8');
-mb_internal_encoding('UTF-8');
-mb_http_output('UTF-8');
-
 require_once 'config.php';
 
 $pdo = DB::getInstance();
 
 // Handle form submissions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = $_POST['action'] ?? '';
-    
-    try {
-        switch ($action) {
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
             case 'add_player':
-                $name = trim($_POST['name'] ?? '');
-                $mainPosition = $_POST['main_position'] ?? '';
-                $secondaryPosition = $_POST['secondary_position'] ?? null;
-                $mainSkill = $_POST['main_skill'] ?? '';
-                $secondarySkill = $_POST['secondary_skill'] ?? null;
-                
-                if (empty($name) || empty($mainPosition) || empty($mainSkill)) {
-                    throw new Exception('Vui lòng điền đầy đủ thông tin bắt buộc');
-                }
-                
-                // Check if name already exists
-                $stmt = $pdo->prepare("SELECT id FROM players WHERE name = ?");
-                $stmt->execute([$name]);
-                if ($stmt->fetch()) {
-                    throw new Exception('Tên cầu thủ đã tồn tại');
-                }
-                
-                $stmt = $pdo->prepare("
-                    INSERT INTO players (name, main_position, secondary_position, main_skill, secondary_skill) 
-                    VALUES (?, ?, ?, ?, ?)
-                ");
-                $stmt->execute([$name, $mainPosition, $secondaryPosition ?: null, $mainSkill, $secondarySkill ?: null]);
-                
-                $success = "Thêm cầu thủ thành công!";
+                addPlayer($_POST);
                 break;
-                
             case 'update_player':
-                $playerId = $_POST['player_id'] ?? null;
-                $name = trim($_POST['name'] ?? '');
-                $mainPosition = $_POST['main_position'] ?? '';
-                $secondaryPosition = $_POST['secondary_position'] ?? null;
-                $mainSkill = $_POST['main_skill'] ?? '';
-                $secondarySkill = $_POST['secondary_skill'] ?? null;
-                
-                if (!$playerId || empty($name) || empty($mainPosition) || empty($mainSkill)) {
-                    throw new Exception('Vui lòng điền đầy đủ thông tin bắt buộc');
-                }
-                
-                // Check if name already exists for other players
-                $stmt = $pdo->prepare("SELECT id FROM players WHERE name = ? AND id != ?");
-                $stmt->execute([$name, $playerId]);
-                if ($stmt->fetch()) {
-                    throw new Exception('Tên cầu thủ đã tồn tại');
-                }
-                
-                $stmt = $pdo->prepare("
-                    UPDATE players 
-                    SET name = ?, main_position = ?, secondary_position = ?, main_skill = ?, secondary_skill = ?
-                    WHERE id = ?
-                ");
-                $stmt->execute([$name, $mainPosition, $secondaryPosition ?: null, $mainSkill, $secondarySkill ?: null, $playerId]);
-                
-                $success = "Cập nhật thông tin cầu thủ thành công!";
+                updatePlayer($_POST);
                 break;
-                
             case 'delete_player':
-                $playerId = $_POST['player_id'] ?? null;
-                
-                if (!$playerId) {
-                    throw new Exception('ID cầu thủ không hợp lệ');
-                }
-                
-                // Check if player is in any ongoing match
-                $stmt = $pdo->prepare("
-                    SELECT COUNT(*) FROM match_participants mp
-                    JOIN daily_matches dm ON mp.match_id = dm.id
-                    WHERE mp.player_id = ? AND dm.status != 'completed'
-                ");
-                $stmt->execute([$playerId]);
-                $activeMatches = $stmt->fetchColumn();
-                
-                if ($activeMatches > 0) {
-                    throw new Exception('Không thể xóa cầu thủ đang tham gia trận đấu');
-                }
-                
-                $stmt = $pdo->prepare("DELETE FROM players WHERE id = ?");
-                $stmt->execute([$playerId]);
-                
-                $success = "Xóa cầu thủ thành công!";
+                deletePlayer($_POST['player_id']);
                 break;
         }
-    } catch (Exception $e) {
-        $error = $e->getMessage();
+        // Redirect to prevent form resubmission
+        header('Location: players.php');
+        exit;
     }
 }
 
-// Get filters
-$positionFilter = $_GET['position'] ?? '';
-$skillFilter = $_GET['skill'] ?? '';
-$search = $_GET['search'] ?? '';
-
-// Build query
-$whereConditions = [];
-$params = [];
-
-if (!empty($positionFilter)) {
-    $whereConditions[] = "(main_position = ? OR secondary_position = ?)";
-    $params[] = $positionFilter;
-    $params[] = $positionFilter;
+function addPlayer($data) {
+    global $pdo;
+    
+    $stmt = $pdo->prepare("
+        INSERT INTO players (name, main_position, secondary_position, main_skill, secondary_skill, is_special_player) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    ");
+    
+    $stmt->execute([
+        $data['name'],
+        $data['main_position'],
+        $data['secondary_position'] ?: null,
+        $data['main_skill'],
+        $data['secondary_skill'] ?: null,
+        isset($data['is_special_player']) ? 1 : 0
+    ]);
 }
 
-if (!empty($skillFilter)) {
-    $whereConditions[] = "(main_skill = ? OR secondary_skill = ?)";
-    $params[] = $skillFilter;
-    $params[] = $skillFilter;
+function updatePlayer($data) {
+    global $pdo;
+    
+    $stmt = $pdo->prepare("
+        UPDATE players 
+        SET name = ?, main_position = ?, secondary_position = ?, 
+            main_skill = ?, secondary_skill = ?, is_special_player = ?
+        WHERE id = ?
+    ");
+    
+    $stmt->execute([
+        $data['name'],
+        $data['main_position'],
+        $data['secondary_position'] ?: null,
+        $data['main_skill'],
+        $data['secondary_skill'] ?: null,
+        isset($data['is_special_player']) ? 1 : 0,
+        $data['player_id']
+    ]);
 }
 
-if (!empty($search)) {
-    $whereConditions[] = "name LIKE ?";
-    $params[] = "%$search%";
+function deletePlayer($playerId) {
+    global $pdo;
+    
+    // Check if player has matches
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM match_participants WHERE player_id = ?");
+    $stmt->execute([$playerId]);
+    $matchCount = $stmt->fetchColumn();
+    
+    if ($matchCount > 0) {
+        throw new Exception("Không thể xóa cầu thủ đã tham gia trận đấu");
+    }
+    
+    $stmt = $pdo->prepare("DELETE FROM players WHERE id = ?");
+    $stmt->execute([$playerId]);
 }
 
-$whereClause = empty($whereConditions) ? '' : 'WHERE ' . implode(' AND ', $whereConditions);
-
-// Get players
-$stmt = $pdo->prepare("
-    SELECT * FROM players 
-    $whereClause
-    ORDER BY name ASC
+// Get all players with statistics
+$stmt = $pdo->query("
+    SELECT p.*, 
+            COUNT(mp.id) as matches_played,
+            COUNT(mp.id) as total_matches,
+            SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
+                     WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
+                     ELSE 0 END) as total_wins,
+            SUM(CASE WHEN dm.team_a_score = dm.team_b_score THEN 1 ELSE 0 END) as total_draws,
+            SUM(CASE WHEN dm.team_a_score < dm.team_b_score AND mp.team = 'A' THEN 1 
+                     WHEN dm.team_b_score < dm.team_a_score AND mp.team = 'B' THEN 1 
+                     ELSE 0 END) as losses,
+            SUM(mp.goals) as total_goals,
+            SUM(mp.assists) as total_assists,
+            SUM(mp.points_earned) as total_points,
+            ROUND(SUM(mp.points_earned) / GREATEST(COUNT(mp.id), 1), 2) as avg_points,
+            ROUND((SUM(CASE WHEN dm.team_a_score > dm.team_b_score AND mp.team = 'A' THEN 1 
+                            WHEN dm.team_b_score > dm.team_a_score AND mp.team = 'B' THEN 1 
+                            ELSE 0 END) / GREATEST(COUNT(mp.id), 1)) * 100, 1) as win_rate
+    FROM players p
+        LEFT JOIN match_participants mp ON p.id = mp.player_id 
+        LEFT JOIN daily_matches dm ON mp.match_id = dm.id 
+    WHERE dm.status = 'completed'
+    GROUP BY p.id,
+        name,
+        main_position,
+        secondary_position,
+        main_skill,
+        secondary_skill,
+        total_points,
+        total_matches,
+        total_wins,
+        total_goals,
+        total_assists,
+        created_at,
+        updated_at,
+        is_special_player,
+        total_draws
+    HAVING matches_played > 0
+    ORDER BY p.total_points DESC, p.name ASC
 ");
-$stmt->execute($params);
 $players = $stmt->fetchAll();
 
 // Get statistics
-$stmt = $pdo->query("
-    SELECT 
-        COUNT(*) as total_players,
-        COUNT(CASE WHEN main_skill = 'Tốt' THEN 1 END) as good_players,
-        COUNT(CASE WHEN main_skill = 'Trung bình' THEN 1 END) as average_players,
-        COUNT(CASE WHEN main_skill = 'Yếu' THEN 1 END) as weak_players
-    FROM players
-");
-$stats = $stmt->fetch();
-
-// Get position distribution
-$stmt = $pdo->query("
-    SELECT main_position, COUNT(*) as count 
-    FROM players 
-    GROUP BY main_position 
-    ORDER BY count DESC
-");
-$positionStats = $stmt->fetchAll();
+$totalPlayers = count($players);
+$specialPlayers = count(array_filter($players, function($p) { return $p['is_special_player']; }));
+$activePlayers = count(array_filter($players, function($p) { return $p['total_matches'] > 0; }));
 ?>
 
 <!DOCTYPE html>
@@ -164,30 +132,10 @@ $positionStats = $stmt->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <title>👥 Quản lý cầu thủ - FC Gà Gáy</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
-        /* Fix font rendering for Vietnamese */
-        * {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-        }
-        
-        input, select, textarea {
-            font-family: 'Times New Roman', Times, serif; !important;
-            font-size: 14px !important;
-            line-height: 1.5 !important;
-            text-transform: none;
-        }
-        
-        .form-control, .form-select {
-            font-family: 'Times New Roman', Times, serif; !important;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-            text-transform: none;
-        }
-        
         .gradient-bg {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
@@ -196,17 +144,30 @@ $positionStats = $stmt->fetchAll();
             border-radius: 15px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
         }
-        .player-card {
-            border: 1px solid #e9ecef;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 15px;
-            background: white;
+        .special-player {
+            background: linear-gradient(45deg, #fff3e0, #ffe0b2);
+            border-left: 4px solid #ff9800;
+        }
+        .special-badge {
+            background: linear-gradient(45deg, #ff9800, #f57c00);
+            color: white;
+            border: none;
+            box-shadow: 0 2px 4px rgba(255, 152, 0, 0.3);
+        }
+        .player-row {
             transition: all 0.3s ease;
         }
-        .player-card:hover {
-            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        .player-row:hover {
             transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .stats-card {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
         }
         .position-badge {
             font-size: 0.8em;
@@ -218,17 +179,9 @@ $positionStats = $stmt->fetchAll();
             padding: 2px 6px;
             border-radius: 8px;
         }
-        .stats-card {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
-            color: white;
-            border-radius: 15px;
-            padding: 20px;
-            text-align: center;
-            margin-bottom: 20px;
-        }
         .player-avatar {
-            width: 50px;
-            height: 50px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
             background: linear-gradient(45deg, #667eea, #764ba2);
             display: flex;
@@ -236,58 +189,34 @@ $positionStats = $stmt->fetchAll();
             justify-content: center;
             color: white;
             font-weight: bold;
+        }
+        .special-avatar {
+            background: linear-gradient(45deg, #ff9800, #f57c00);
+            box-shadow: 0 0 10px rgba(255, 152, 0, 0.5);
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .nav-link {
+            font-weight: 500;
+        }
+        .modal-content {
+            border-radius: 15px;
+        }
+        .form-switch input:checked {
+            background-color: #ff9800;
+            border-color: #ff9800;
+        }
+        .special-indicator {
+            position: absolute;
+            top: -5px;
+            right: -5px;
             font-size: 1.2em;
+            animation: sparkle 2s infinite;
         }
-        .modal-lg {
-            max-width: 800px;
-        }
-        .form-label {
-            font-weight: 600;
-        }
-        .required {
-            color: #dc3545;
-        }
-        .filter-section {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-        .player-stats {
-            background: #e3f2fd;
-            border-radius: 8px;
-            padding: 10px;
-            margin-top: 10px;
-        }
-        .position-stat {
-            display: inline-block;
-            background: white;
-            border-radius: 20px;
-            padding: 8px 16px;
-            margin: 5px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        
-        /* Fix modal input font */
-        .modal input[type="text"],
-        .modal select,
-        .modal textarea {
-            font-family: 'Times New Roman' !important;
-            font-size: 14px !important;
-            line-height: 1.5 !important;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
-        
-        /* Ensure proper Vietnamese text rendering */
-        .modal-body {
-            font-family: 'Times New Roman';
-        }
-        
-        .form-control:focus,
-        .form-select:focus {
-            font-family: 'Times New Roman' !important;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        @keyframes sparkle {
+            0%, 100% { transform: scale(1) rotate(0deg); }
+            50% { transform: scale(1.2) rotate(180deg); }
         }
     </style>
 </head>
@@ -336,21 +265,6 @@ $positionStats = $stmt->fetchAll();
                         </a>
                     </li>
                 </ul>
-                
-                <ul class="navbar-nav">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="fas fa-cog"></i> Tiện ích
-                        </a>
-                        <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="players.php"><i class="fas fa-users"></i> Quản lý cầu thủ</a></li>
-                            <li><a class="dropdown-item" href="history.php"><i class="fas fa-history"></i> Lịch sử trận đấu</a></li>
-                            <li><a class="dropdown-item" href="statistics.php"><i class="fas fa-chart-bar"></i> Thống kê chi tiết</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" href="settings.php"><i class="fas fa-settings"></i> Cài đặt</a></li>
-                        </ul>
-                    </li>
-                </ul>
             </div>
         </div>
     </nav>
@@ -362,208 +276,160 @@ $positionStats = $stmt->fetchAll();
                 <div class="row align-items-center">
                     <div class="col-md-8">
                         <h1 class="mb-2">👥 Quản lý cầu thủ</h1>
-                        <p class="lead mb-0">Thêm, sửa, xóa và quản lý thông tin cầu thủ</p>
+                        <p class="lead mb-0">Thêm, sửa, xóa thông tin cầu thủ</p>
                     </div>
                     <div class="col-md-4 text-end">
-                        <button type="button" class="btn btn-success btn-lg" data-bs-toggle="modal" data-bs-target="#addPlayerModal">
-                            <i class="fas fa-user-plus"></i> Thêm cầu thủ mới
+                        <button class="btn btn-success btn-lg" data-bs-toggle="modal" data-bs-target="#addPlayerModal">
+                            <i class="fas fa-user-plus"></i> Thêm cầu thủ
                         </button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Alerts -->
-        <?php if (isset($success)): ?>
-            <div class="alert alert-success alert-dismissible fade show">
-                <i class="fas fa-check-circle"></i> <?= htmlspecialchars($success) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        <?php endif; ?>
-
-        <?php if (isset($error)): ?>
-            <div class="alert alert-danger alert-dismissible fade show">
-                <i class="fas fa-exclamation-circle"></i> <?= htmlspecialchars($error) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-        <?php endif; ?>
-
-        <div class="row">
-            <!-- Left Column: Stats & Filters -->
-            <div class="col-lg-4">
-                <!-- Statistics -->
-                <div class="row mb-4">
-                    <div class="col-6">
-                        <div class="stats-card">
-                            <h3><?= $stats['total_players'] ?></h3>
-                            <small>Tổng cầu thủ</small>
-                        </div>
-                    </div>
-                    <div class="col-6">
-                        <div class="stats-card">
-                            <h3><?= $stats['good_players'] ?></h3>
-                            <small>Trình độ tốt</small>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Position Distribution -->
-                <div class="card card-custom mb-4">
-                    <div class="card-header">
-                        <h6 class="mb-0">
-                            <i class="fas fa-chart-pie"></i> Phân bố vị trí
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <?php foreach ($positionStats as $stat): ?>
-                            <div class="position-stat">
-                                <strong><?= formatPosition($stat['main_position']) ?></strong>
-                                <span class="badge bg-primary"><?= $stat['count'] ?></span>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-
-                <!-- Filters -->
-                <div class="card card-custom">
-                    <div class="card-header">
-                        <h6 class="mb-0">
-                            <i class="fas fa-filter"></i> Bộ lọc
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <form method="GET" action="players.php">
-                            <div class="mb-3">
-                                <label class="form-label">Tìm kiếm tên:</label>
-                                <input type="text" class="form-control" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Nhập tên cầu thủ...">
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label class="form-label">Vị trí:</label>
-                                <select class="form-select" name="position">
-                                    <option value="">Tất cả vị trí</option>
-                                    <option value="Thủ môn" <?= $positionFilter === 'Thủ môn' ? 'selected' : '' ?>>🥅 Thủ môn</option>
-                                    <option value="Trung vệ" <?= $positionFilter === 'Trung vệ' ? 'selected' : '' ?>>🛡️ Trung vệ</option>
-                                    <option value="Hậu vệ cánh" <?= $positionFilter === 'Hậu vệ cánh' ? 'selected' : '' ?>>⚡ Hậu vệ cánh</option>
-                                    <option value="Tiền vệ" <?= $positionFilter === 'Tiền vệ' ? 'selected' : '' ?>>⚽ Tiền vệ</option>
-                                    <option value="Tiền đạo" <?= $positionFilter === 'Tiền đạo' ? 'selected' : '' ?>>🎯 Tiền đạo</option>
-                                </select>
-                            </div>
-                            
-                            <div class="mb-3">
-                                <label class="form-label">Trình độ:</label>
-                                <select class="form-select" name="skill">
-                                    <option value="">Tất cả trình độ</option>
-                                    <option value="Tốt" <?= $skillFilter === 'Tốt' ? 'selected' : '' ?>>Tốt</option>
-                                    <option value="Trung bình" <?= $skillFilter === 'Trung bình' ? 'selected' : '' ?>>Trung bình</option>
-                                    <option value="Yếu" <?= $skillFilter === 'Yếu' ? 'selected' : '' ?>>Yếu</option>
-                                </select>
-                            </div>
-                            
-                            <div class="d-grid gap-2">
-                                <button type="submit" class="btn btn-primary">
-                                    <i class="fas fa-search"></i> Lọc
-                                </button>
-                                <a href="players.php" class="btn btn-outline-secondary">
-                                    <i class="fas fa-undo"></i> Reset
-                                </a>
-                            </div>
-                        </form>
-                    </div>
+        <!-- Statistics Cards -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h3><?= $totalPlayers ?></h3>
+                    <small>Tổng cầu thủ</small>
                 </div>
             </div>
+            <div class="col-md-3">
+                <div class="stats-card" style="background: linear-gradient(45deg, #ff9800, #f57c00);">
+                    <h3><?= $specialPlayers ?></h3>
+                    <small>Cầu thủ đặc cách</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card" style="background: linear-gradient(45deg, #2196f3, #1976d2);">
+                    <h3><?= $activePlayers ?></h3>
+                    <small>Đã thi đấu</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card" style="background: linear-gradient(45deg, #9c27b0, #7b1fa2);">
+                    <h3><?= $totalPlayers - $activePlayers ?></h3>
+                    <small>Chưa thi đấu</small>
+                </div>
+            </div>
+        </div>
 
-            <!-- Right Column: Player List -->
-            <div class="col-lg-8">
-                <div class="card card-custom">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
-                            <i class="fas fa-list"></i> Danh sách cầu thủ (<?= count($players) ?>)
-                        </h5>
-                        <div class="btn-group">
-                            <button class="btn btn-sm btn-outline-primary" onclick="toggleView('grid')" id="gridViewBtn">
-                                <i class="fas fa-th"></i> Lưới
-                            </button>
-                            <button class="btn btn-sm btn-outline-primary active" onclick="toggleView('list')" id="listViewBtn">
-                                <i class="fas fa-list"></i> Danh sách
-                            </button>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <?php if (empty($players)): ?>
-                            <div class="text-center py-5">
-                                <i class="fas fa-users fa-3x text-muted mb-3"></i>
-                                <h5 class="text-muted">Không tìm thấy cầu thủ nào</h5>
-                                <p class="text-muted">Thử thay đổi bộ lọc hoặc thêm cầu thủ mới</p>
-                            </div>
-                        <?php else: ?>
-                            <div id="playersList">
-                                <?php foreach ($players as $player): ?>
-                                    <div class="player-card">
-                                        <div class="row align-items-center">
-                                            <div class="col-md-2">
-                                                <div class="player-avatar">
-                                                    <?= strtoupper(substr($player['name'], 0, 2)) ?>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-4">
-                                                <h6 class="mb-1"><?= htmlspecialchars($player['name']) ?></h6>
-                                                <div class="small text-muted">
-                                                    <span class="badge bg-info position-badge">
-                                                        <?= formatPosition($player['main_position']) ?>
-                                                    </span>
-                                                    <?php if ($player['secondary_position']): ?>
-                                                        <span class="badge bg-outline-info position-badge">
-                                                            <?= formatPosition($player['secondary_position']) ?>
-                                                        </span>
-                                                    <?php endif; ?>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-3">
-                                                <?php $skill = formatSkill($player['main_skill']); ?>
-                                                <span class="badge bg-<?= $skill['color'] ?> skill-badge">
-                                                    Chính: <?= $skill['text'] ?>
-                                                </span>
-                                                <?php if ($player['secondary_skill']): ?>
-                                                    <?php $secSkill = formatSkill($player['secondary_skill']); ?>
-                                                    <br><span class="badge bg-<?= $secSkill['color'] ?> skill-badge mt-1">
-                                                        Phụ: <?= $secSkill['text'] ?>
-                                                    </span>
+        <!-- Players List -->
+        <div class="card card-custom">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="fas fa-list"></i> Danh sách cầu thủ
+                </h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-warning" onclick="filterSpecialPlayers()">
+                        <i class="fas fa-star"></i> Cầu thủ đặc cách
+                    </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="showAllPlayers()">
+                        <i class="fas fa-users"></i> Tất cả
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Cầu thủ</th>
+                                <th>Vị trí chính</th>
+                                <th>Vị trí phụ</th>
+                                <th>Kỹ năng</th>
+                                <th>Loại</th>
+                                <th>Thống kê</th>
+                                <th>Điểm</th>
+                                <th>Hành động</th>
+                            </tr>
+                        </thead>
+                        <tbody id="playersTableBody">
+                            <?php foreach ($players as $player): ?>
+                                <tr class="player-row <?= $player['is_special_player'] ? 'special-player' : '' ?>" 
+                                    data-special="<?= $player['is_special_player'] ?>">
+                                    <td>
+                                        <div class="d-flex align-items-center">
+                                            <div class="player-avatar <?= $player['is_special_player'] ? 'special-avatar' : '' ?> me-3 position-relative">
+                                                <?= strtoupper(substr($player['name'], 0, 2)) ?>
+                                                <?php if ($player['is_special_player']): ?>
+                                                    <span class="special-indicator"></span>
                                                 <?php endif; ?>
                                             </div>
-                                            <div class="col-md-2">
-                                                <div class="player-stats small">
-                                                    <div><strong><?= $player['total_points'] ?></strong> điểm</div>
-                                                    <div><?= $player['total_matches'] ?> trận</div>
-                                                    <div><?= $player['total_goals'] ?> bàn thắng</div>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-1">
-                                                <div class="dropdown">
-                                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
-                                                        <i class="fas fa-ellipsis-v"></i>
-                                                    </button>
-                                                    <ul class="dropdown-menu">
-                                                        <li>
-                                                            <a class="dropdown-item" href="#" onclick="editPlayer(<?= htmlspecialchars(json_encode($player)) ?>)">
-                                                                <i class="fas fa-edit"></i> Sửa
-                                                            </a>
-                                                        </li>
-                                                        <li><hr class="dropdown-divider"></li>
-                                                        <li>
-                                                            <a class="dropdown-item text-danger" href="#" onclick="deletePlayer(<?= $player['id'] ?>, '<?= htmlspecialchars($player['name']) ?>')">
-                                                                <i class="fas fa-trash"></i> Xóa
-                                                            </a>
-                                                        </li>
-                                                    </ul>
-                                                </div>
+                                            <div>
+                                                <strong><?= htmlspecialchars($player['name']) ?></strong>
+                                                <?php if ($player['is_special_player']): ?>
+                                                    <span class="badge special-badge ms-2">Đặc cách</span>
+                                                <?php endif; ?>
                                             </div>
                                         </div>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-info position-badge">
+                                            <?= formatPosition($player['main_position']) ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <?php if ($player['secondary_position']): ?>
+                                            <span class="badge bg-secondary position-badge">
+                                                <?= formatPosition($player['secondary_position']) ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="text-muted small">Không có</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php $mainSkill = formatSkill($player['main_skill']); ?>
+                                        <span class="badge bg-<?= $mainSkill['color'] ?> skill-badge">
+                                            <?= $mainSkill['text'] ?>
+                                        </span>
+                                        <?php if ($player['secondary_skill']): ?>
+                                            <?php $secSkill = formatSkill($player['secondary_skill']); ?>
+                                            <span class="badge bg-<?= $secSkill['color'] ?> skill-badge">
+                                                <?= $secSkill['text'] ?>
+                                            </span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if ($player['is_special_player']): ?>
+                                            <span class="badge special-badge">
+                                                Đặc cách
+                                                <small class="d-block">x1.5 điểm</small>
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="badge bg-secondary">Thường</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <div class="small">
+                                            <div><strong><?= $player['total_matches'] ?></strong> trận</div>
+                                            <div><?= formatWinDrawLoss($player['total_wins'], $player['total_draws'], calculateLosses($player['total_matches'], $player['total_wins'], $player['total_draws'])) ?></div>
+                                            <div><?= $player['total_goals'] ?>⚽ <?= $player['total_assists'] ?>🎯</div>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="text-center">
+                                            <div class="h6 mb-0 text-success"><?= $player['total_points'] ?></div>
+                                            <small class="text-muted"><?= $player['avg_points'] ?>/trận</small>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="btn-group">
+                                            <button class="btn btn-sm btn-outline-primary" 
+                                                    onclick="editPlayer(<?= htmlspecialchars(json_encode($player)) ?>)">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger" 
+                                                    onclick="deletePlayer(<?= $player['id'] ?>, '<?= htmlspecialchars($player['name']) ?>')">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -571,7 +437,7 @@ $positionStats = $stmt->fetchAll();
 
     <!-- Add Player Modal -->
     <div class="modal fade" id="addPlayerModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
@@ -579,20 +445,21 @@ $positionStats = $stmt->fetchAll();
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST" action="players.php">
-                    <input type="hidden" name="action" value="add_player">
+                <form method="POST">
                     <div class="modal-body">
+                        <input type="hidden" name="action" value="add_player">
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Tên cầu thủ <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="name" required>
+                        </div>
+                        
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label class="form-label">Tên cầu thủ <span class="required">*</span></label>
-                                    <input type="text" class="form-control" name="name" required maxlength="100" placeholder="Nhập tên cầu thủ">
-                                </div>
-                                
-                                <div class="mb-3">
-                                    <label class="form-label">Vị trí chính <span class="required">*</span></label>
+                                    <label class="form-label">Vị trí chính <span class="text-danger">*</span></label>
                                     <select class="form-select" name="main_position" required>
-                                        <option value="">Chọn vị trí chính</option>
+                                        <option value="">Chọn vị trí</option>
                                         <option value="Thủ môn">🥅 Thủ môn</option>
                                         <option value="Trung vệ">🛡️ Trung vệ</option>
                                         <option value="Hậu vệ cánh">⚡ Hậu vệ cánh</option>
@@ -600,47 +467,44 @@ $positionStats = $stmt->fetchAll();
                                         <option value="Tiền đạo">🎯 Tiền đạo</option>
                                     </select>
                                 </div>
-                                
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label class="form-label">Trình độ chính <span class="required">*</span></label>
+                                    <label class="form-label">Kỹ năng chính <span class="text-danger">*</span></label>
                                     <select class="form-select" name="main_skill" required>
-                                        <option value="">Chọn trình độ chính</option>
+                                        <option value="">Chọn kỹ năng</option>
                                         <option value="Tốt">Tốt</option>
                                         <option value="Trung bình">Trung bình</option>
                                         <option value="Yếu">Yếu</option>
                                     </select>
                                 </div>
                             </div>
-                            
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label class="form-label">Vị trí phụ</label>
-                                    <select class="form-select" name="secondary_position">
-                                        <option value="">Không có vị trí phụ</option>
-                                        <option value="Thủ môn">🥅 Thủ môn</option>
-                                        <option value="Trung vệ">🛡️ Trung vệ</option>
-                                        <option value="Hậu vệ cánh">⚡ Hậu vệ cánh</option>
-                                        <option value="Tiền vệ">⚽ Tiền vệ</option>
-                                        <option value="Tiền đạo">🎯 Tiền đạo</option>
-                                    </select>
-                                </div>
-                                
-                                <div class="mb-3">
-                                    <label class="form-label">Trình độ phụ</label>
+                                    <label class="form-label">Kỹ năng phụ</label>
                                     <select class="form-select" name="secondary_skill">
-                                        <option value="">Không có trình độ phụ</option>
+                                        <option value="">Không có</option>
                                         <option value="Tốt">Tốt</option>
                                         <option value="Trung bình">Trung bình</option>
                                         <option value="Yếu">Yếu</option>
                                     </select>
                                 </div>
-                                
-                                <div class="alert alert-info">
-                                    <small>
-                                        <i class="fas fa-info-circle"></i>
-                                        Vị trí và trình độ phụ là tùy chọn. Chúng sẽ được sử dụng khi chia đội.
-                                    </small>
-                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Cầu thủ đặc cách -->
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="addSpecialPlayer" name="is_special_player">
+                                <label class="form-check-label" for="addSpecialPlayer">
+                                    <strong>⭐ Cầu thủ đặc cách</strong>
+                                    <div class="small text-muted">
+                                        Nhận x1.5 điểm (Thắng: 4.5đ, Hòa: 1.5đ, Thua: 0đ)
+                                    </div>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -657,108 +521,88 @@ $positionStats = $stmt->fetchAll();
 
     <!-- Edit Player Modal -->
     <div class="modal fade" id="editPlayerModal" tabindex="-1">
-        <div class="modal-dialog modal-lg">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
-                        <i class="fas fa-user-edit"></i> Chỉnh sửa thông tin cầu thủ
+                        <i class="fas fa-edit"></i> Sửa thông tin cầu thủ
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <form method="POST" action="players.php" id="editPlayerForm">
-                    <input type="hidden" name="action" value="update_player">
-                    <input type="hidden" name="player_id" id="edit_player_id">
+                <form method="POST" id="editPlayerForm">
                     <div class="modal-body">
+                        <input type="hidden" name="action" value="update_player">
+                        <input type="hidden" name="player_id" id="editPlayerId">
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Tên cầu thủ <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" name="name" id="editPlayerName" required>
+                        </div>
+                        
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="mb-3">
-                                    <label class="form-label">Tên cầu thủ <span class="required">*</span></label>
-                                    <input type="text" class="form-control" name="name" id="edit_name" required maxlength="100">
-                                </div>
-                                
-                                <div class="mb-3">
-                                    <label class="form-label">Vị trí chính <span class="required">*</span></label>
-                                    <select class="form-select" name="main_position" id="edit_main_position" required>
+                                    <label class="form-label">Vị trí chính <span class="text-danger">*</span></label>
+                                    <select class="form-select" name="main_position" id="editMainPosition" required>
+                                        <option value="">Chọn vị trí</option>
                                         <option value="Thủ môn">🥅 Thủ môn</option>
                                         <option value="Trung vệ">🛡️ Trung vệ</option>
                                         <option value="Hậu vệ cánh">⚡ Hậu vệ cánh</option>
                                         <option value="Tiền vệ">⚽ Tiền vệ</option>
                                         <option value="Tiền đạo">🎯 Tiền đạo</option>
-                                    </select>
-                                </div>
-                                
-                                <div class="mb-3">
-                                    <label class="form-label">Trình độ chính <span class="required">*</span></label>
-                                    <select class="form-select" name="main_skill" id="edit_main_skill" required>
-                                        <option value="Tốt">Tốt</option>
-                                        <option value="Trung bình">Trung bình</option>
-                                        <option value="Yếu">Yếu</option>
                                     </select>
                                 </div>
                             </div>
-                            
                             <div class="col-md-6">
                                 <div class="mb-3">
                                     <label class="form-label">Vị trí phụ</label>
-                                    <select class="form-select" name="secondary_position" id="edit_secondary_position">
-                                        <option value="">Không có vị trí phụ</option>
+                                    <select class="form-select" name="secondary_position" id="editSecondaryPosition">
+                                        <option value="">Không có</option>
                                         <option value="Thủ môn">🥅 Thủ môn</option>
                                         <option value="Trung vệ">🛡️ Trung vệ</option>
                                         <option value="Hậu vệ cánh">⚡ Hậu vệ cánh</option>
                                         <option value="Tiền vệ">⚽ Tiền vệ</option>
                                         <option value="Tiền đạo">🎯 Tiền đạo</option>
                                     </select>
-                                </div>
-                                
-                                <div class="mb-3">
-                                    <label class="form-label">Trình độ phụ</label>
-                                    <select class="form-select" name="secondary_skill" id="edit_secondary_skill">
-                                        <option value="">Không có trình độ phụ</option>
-                                        <option value="Tốt">Tốt</option>
-                                        <option value="Trung bình">Trung bình</option>
-                                        <option value="Yếu">Yếu</option>
-                                    </select>
-                                </div>
-                                
-                                <div class="alert alert-warning">
-                                    <small>
-                                        <i class="fas fa-exclamation-triangle"></i>
-                                        Thay đổi thông tin cầu thủ sẽ ảnh hưởng đến các trận đấu tương lai.
-                                    </small>
                                 </div>
                             </div>
                         </div>
                         
-                        <!-- Player Statistics Display -->
-                        <div class="row mt-3">
-                            <div class="col-12">
-                                <h6>Thống kê hiện tại:</h6>
-                                <div class="row text-center">
-                                    <div class="col-3">
-                                        <div class="bg-light p-2 rounded">
-                                            <div class="h5 mb-0" id="edit_total_points">0</div>
-                                            <small class="text-muted">Điểm</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-3">
-                                        <div class="bg-light p-2 rounded">
-                                            <div class="h5 mb-0" id="edit_total_matches">0</div>
-                                            <small class="text-muted">Trận</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-3">
-                                        <div class="bg-light p-2 rounded">
-                                            <div class="h5 mb-0" id="edit_total_goals">0</div>
-                                            <small class="text-muted">Bàn thắng</small>
-                                        </div>
-                                    </div>
-                                    <div class="col-3">
-                                        <div class="bg-light p-2 rounded">
-                                            <div class="h5 mb-0" id="edit_total_assists">0</div>
-                                            <small class="text-muted">Kiến tạo</small>
-                                        </div>
-                                    </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Kỹ năng chính <span class="text-danger">*</span></label>
+                                    <select class="form-select" name="main_skill" id="editMainSkill" required>
+                                        <option value="">Chọn kỹ năng</option>
+                                        <option value="Tốt">Tốt</option>
+                                        <option value="Trung bình">Trung bình</option>
+                                        <option value="Yếu">Yếu</option>
+                                    </select>
                                 </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Kỹ năng phụ</label>
+                                    <select class="form-select" name="secondary_skill" id="editSecondarySkill">
+                                        <option value="">Không có</option>
+                                        <option value="Tốt">Tốt</option>
+                                        <option value="Trung bình">Trung bình</option>
+                                        <option value="Yếu">Yếu</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Cầu thủ đặc cách -->
+                        <div class="mb-3">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="editSpecialPlayer" name="is_special_player">
+                                <label class="form-check-label" for="editSpecialPlayer">
+                                    <strong>⭐ Cầu thủ đặc cách</strong>
+                                    <div class="small text-muted">
+                                        Nhận x1.5 điểm (Thắng: 4.5đ, Hòa: 1.5đ, Thua: 0đ)
+                                    </div>
+                                </label>
                             </div>
                         </div>
                     </div>
@@ -784,21 +628,19 @@ $positionStats = $stmt->fetchAll();
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Bạn có chắc chắn muốn xóa cầu thủ <strong id="delete_player_name"></strong>?</p>
+                    <p>Bạn có chắc chắn muốn xóa cầu thủ <strong id="deletePlayerName"></strong>?</p>
                     <div class="alert alert-warning">
-                        <small>
-                            <i class="fas fa-info-circle"></i>
-                            Hành động này không thể hoàn tác. Tất cả dữ liệu liên quan sẽ bị xóa.
-                        </small>
+                        <i class="fas fa-warning"></i>
+                        Không thể hoàn tác hành động này!
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Hủy</button>
-                    <form method="POST" action="players.php" style="display: inline;">
+                    <form method="POST" style="display: inline;">
                         <input type="hidden" name="action" value="delete_player">
-                        <input type="hidden" name="player_id" id="delete_player_id">
+                        <input type="hidden" name="player_id" id="deletePlayerId">
                         <button type="submit" class="btn btn-danger">
-                            <i class="fas fa-trash"></i> Xóa cầu thủ
+                            <i class="fas fa-trash"></i> Xóa
                         </button>
                     </form>
                 </div>
@@ -810,18 +652,13 @@ $positionStats = $stmt->fetchAll();
     <script>
         // Edit player function
         function editPlayer(player) {
-            document.getElementById('edit_player_id').value = player.id;
-            document.getElementById('edit_name').value = player.name;
-            document.getElementById('edit_main_position').value = player.main_position;
-            document.getElementById('edit_main_skill').value = player.main_skill;
-            document.getElementById('edit_secondary_position').value = player.secondary_position || '';
-            document.getElementById('edit_secondary_skill').value = player.secondary_skill || '';
-            
-            // Update statistics display
-            document.getElementById('edit_total_points').textContent = player.total_points;
-            document.getElementById('edit_total_matches').textContent = player.total_matches;
-            document.getElementById('edit_total_goals').textContent = player.total_goals;
-            document.getElementById('edit_total_assists').textContent = player.total_assists;
+            document.getElementById('editPlayerId').value = player.id;
+            document.getElementById('editPlayerName').value = player.name;
+            document.getElementById('editMainPosition').value = player.main_position;
+            document.getElementById('editSecondaryPosition').value = player.secondary_position || '';
+            document.getElementById('editMainSkill').value = player.main_skill;
+            document.getElementById('editSecondarySkill').value = player.secondary_skill || '';
+            document.getElementById('editSpecialPlayer').checked = player.is_special_player == 1;
             
             const modal = new bootstrap.Modal(document.getElementById('editPlayerModal'));
             modal.show();
@@ -829,293 +666,107 @@ $positionStats = $stmt->fetchAll();
 
         // Delete player function
         function deletePlayer(playerId, playerName) {
-            document.getElementById('delete_player_id').value = playerId;
-            document.getElementById('delete_player_name').textContent = playerName;
+            document.getElementById('deletePlayerId').value = playerId;
+            document.getElementById('deletePlayerName').textContent = playerName;
             
             const modal = new bootstrap.Modal(document.getElementById('deletePlayerModal'));
             modal.show();
         }
 
-        // Toggle view function
-        function toggleView(viewType) {
-            const gridBtn = document.getElementById('gridViewBtn');
-            const listBtn = document.getElementById('listViewBtn');
-            const playersList = document.getElementById('playersList');
-            
-            if (viewType === 'grid') {
-                gridBtn.classList.add('active');
-                listBtn.classList.remove('active');
-                playersList.className = 'row';
-                
-                // Convert to grid view
-                const playerCards = playersList.querySelectorAll('.player-card');
-                playerCards.forEach(card => {
-                    card.parentElement.className = 'col-md-6 col-lg-4 mb-3';
-                    card.querySelector('.row').className = 'text-center';
-                });
-            } else {
-                listBtn.classList.add('active');
-                gridBtn.classList.remove('active');
-                playersList.className = '';
-                
-                // Convert to list view
-                const playerCards = playersList.querySelectorAll('.player-card');
-                playerCards.forEach(card => {
-                    if (card.parentElement.className.includes('col-')) {
-                        const wrapper = card.parentElement;
-                        wrapper.className = '';
-                        card.querySelector('.text-center').className = 'row align-items-center';
-                    }
-                });
-            }
-        }
-
-        // Form validation
-        document.addEventListener('DOMContentLoaded', function() {
-            // Fix Vietnamese font rendering
-            const inputs = document.querySelectorAll('input[type="text"], textarea');
-            // inputs.forEach(input => {
-            //     input.style.fontFamily = 'Times New Roman';
-            //     input.style.fontSize = '14px';
-            //     input.style.lineHeight = '1.5';
-            // });
-            
-            // Validate name input - Allow Vietnamese characters
-            const nameInputs = document.querySelectorAll('input[name="name"]');
-            // nameInputs.forEach(input => {
-            //     input.addEventListener('input', function() {
-            //         // Allow Vietnamese characters, letters, spaces, parentheses
-            //         this.value = this.value.replace(/[^a-zA-ZÀ-ỹ\s\(\)\-\.]/g, '');
-                    
-            //         // Capitalize first letter of each word
-            //         this.value = this.value.replace(/\b\w/g, l => l.toUpperCase());
-                    
-            //         // Remove multiple spaces
-            //         this.value = this.value.replace(/\s+/g, ' ');
-            //     });
-                
-            //     // Fix font on focus
-            //     input.addEventListener('focus', function() {
-            //         this.style.fontFamily = 'Times New Roman';
-            //         this.style.fontSize = '14px';
-            //     });
-            // });
-
-            // Auto-hide alerts after 5 seconds
-            const alerts = document.querySelectorAll('.alert');
-            alerts.forEach(alert => {
-                if (alert.classList.contains('alert-success') || alert.classList.contains('alert-danger')) {
-                    setTimeout(() => {
-                        alert.style.opacity = '0';
-                        setTimeout(() => alert.remove(), 300);
-                    }, 5000);
-                }
-            });
-
-            // Real-time search
-            const searchInput = document.querySelector('input[name="search"]');
-            if (searchInput) {
-                let searchTimeout;
-                searchInput.addEventListener('input', function() {
-                    clearTimeout(searchTimeout);
-                    searchTimeout = setTimeout(() => {
-                        if (this.value.length >= 2 || this.value.length === 0) {
-                            this.form.submit();
-                        }
-                    }, 500);
-                });
-            }
-
-            // Keyboard shortcuts
-            document.addEventListener('keydown', function(e) {
-                // Ctrl + N to add new player
-                if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
-                    e.preventDefault();
-                    const modal = new bootstrap.Modal(document.getElementById('addPlayerModal'));
-                    modal.show();
-                }
-                
-                // Escape to close modals
-                if (e.key === 'Escape') {
-                    const modals = document.querySelectorAll('.modal.show');
-                    modals.forEach(modal => {
-                        const bsModal = bootstrap.Modal.getInstance(modal);
-                        if (bsModal) bsModal.hide();
-                    });
-                }
-            });
-
-            // Initialize tooltips
-            const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-            tooltipTriggerList.map(function (tooltipTriggerEl) {
-                return new bootstrap.Tooltip(tooltipTriggerEl);
-            });
-        });
-
-        // Advanced filtering
-        function advancedFilter() {
-            const position = document.querySelector('select[name="position"]').value;
-            const skill = document.querySelector('select[name="skill"]').value;
-            const search = document.querySelector('input[name="search"]').value.toLowerCase();
-            
-            const playerCards = document.querySelectorAll('.player-card');
-            let visibleCount = 0;
-            
-            playerCards.forEach(card => {
-                const playerData = {
-                    name: card.querySelector('h6').textContent.toLowerCase(),
-                    position: card.querySelector('.position-badge').textContent,
-                    skill: card.querySelector('.skill-badge').textContent
-                };
-                
-                let visible = true;
-                
-                if (search && !playerData.name.includes(search)) {
-                    visible = false;
-                }
-                
-                if (position && !playerData.position.includes(position)) {
-                    visible = false;
-                }
-                
-                if (skill && !playerData.skill.includes(skill)) {
-                    visible = false;
-                }
-                
-                card.style.display = visible ? 'block' : 'none';
-                if (visible) visibleCount++;
-            });
-            
-            // Update count
-            const countElement = document.querySelector('.card-header h5');
-            if (countElement) {
-                countElement.innerHTML = `<i class="fas fa-list"></i> Danh sách cầu thủ (${visibleCount})`;
-            }
-        }
-
-        // Export functionality
-        function exportPlayers() {
-            const players = <?= json_encode($players) ?>;
-
-            // Sắp xếp giảm dần theo tổng điểm
-            players.sort((a, b) => b.total_points - a.total_points);
-            
-            // BOM để Excel hiểu UTF-8
-            let csv = '\uFEFFTên,Vị trí chính,Vị trí phụ,Trình độ chính,Trình độ phụ,Tổng điểm,Tổng trận,Tổng bàn thắng,Tổng kiến tạo\n';
-            
-            players.forEach(player => {
-                csv += `"${player.name}","${player.main_position}","${player.secondary_position || ''}","${player.main_skill}","${player.secondary_skill || ''}",${player.total_points},${player.total_matches},${player.total_goals},${player.total_assists}\n`;
-            });
-
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', `danh_sach_cau_thu_${new Date().toISOString().split('T')[0]}.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        }
-
-        // Add export button to header if needed
-        document.addEventListener('DOMContentLoaded', function() {
-            const headerActions = document.querySelector('.col-md-4.text-end');
-            if (headerActions && <?= count($players) ?> > 0) {
-                const exportBtn = document.createElement('button');
-                exportBtn.className = 'btn btn-outline-info me-2';
-                exportBtn.innerHTML = '<i class="fas fa-download"></i> Xuất Excel';
-                exportBtn.onclick = exportPlayers;
-                headerActions.insertBefore(exportBtn, headerActions.firstChild);
-            }
-        });
-
-        // Drag and drop functionality for future enhancement
-        function enableDragDrop() {
-            const playerCards = document.querySelectorAll('.player-card');
-            
-            playerCards.forEach(card => {
-                card.draggable = true;
-                
-                card.addEventListener('dragstart', function(e) {
-                    e.dataTransfer.setData('text/plain', card.dataset.playerId);
-                    card.classList.add('dragging');
-                });
-                
-                card.addEventListener('dragend', function() {
-                    card.classList.remove('dragging');
-                });
-            });
-        }
-
-        // Performance optimization for large lists
-        function virtualizeList() {
-            const container = document.getElementById('playersList');
-            const items = container.children;
-            const itemHeight = 100; // Approximate height of each player card
-            const containerHeight = container.clientHeight;
-            const visibleItems = Math.ceil(containerHeight / itemHeight);
-            
-            let scrollTop = container.scrollTop;
-            let startIndex = Math.floor(scrollTop / itemHeight);
-            let endIndex = Math.min(startIndex + visibleItems + 1, items.length);
-            
-            // Hide items outside visible range for better performance
-            for (let i = 0; i < items.length; i++) {
-                if (i < startIndex || i > endIndex) {
-                    items[i].style.display = 'none';
+        // Filter special players
+        function filterSpecialPlayers() {
+            const rows = document.querySelectorAll('.player-row');
+            rows.forEach(row => {
+                if (row.dataset.special === '1') {
+                    row.style.display = '';
                 } else {
-                    items[i].style.display = 'block';
+                    row.style.display = 'none';
                 }
-            }
+            });
         }
 
-        // Auto-save draft functionality
-        let draftTimeout;
-        function saveDraft() {
-            const formData = new FormData(document.querySelector('#addPlayerModal form'));
-            const draft = {};
-            for (let [key, value] of formData.entries()) {
-                if (value.trim()) draft[key] = value;
-            }
-            
-            if (Object.keys(draft).length > 1) { // More than just action
-                localStorage.setItem('player_draft', JSON.stringify(draft));
-            }
+        // Show all players
+        function showAllPlayers() {
+            const rows = document.querySelectorAll('.player-row');
+            rows.forEach(row => {
+                row.style.display = '';
+            });
         }
 
-        function loadDraft() {
-            const draft = localStorage.getItem('player_draft');
-            if (draft) {
-                const data = JSON.parse(draft);
-                Object.keys(data).forEach(key => {
-                    const input = document.querySelector(`#addPlayerModal [name="${key}"]`);
-                    if (input && key !== 'action') {
-                        input.value = data[key];
-                    }
-                });
-            }
-        }
-
-        // Initialize draft functionality
+        // Add animations on page load
         document.addEventListener('DOMContentLoaded', function() {
-            const addPlayerInputs = document.querySelectorAll('#addPlayerModal input, #addPlayerModal select');
-            addPlayerInputs.forEach(input => {
-                input.addEventListener('input', function() {
-                    clearTimeout(draftTimeout);
-                    draftTimeout = setTimeout(saveDraft, 1000);
-                });
+            const rows = document.querySelectorAll('.player-row');
+            rows.forEach((row, index) => {
+                row.style.opacity = '0';
+                row.style.transform = 'translateY(20px)';
+                
+                setTimeout(() => {
+                    row.style.transition = 'all 0.3s ease';
+                    row.style.opacity = '1';
+                    row.style.transform = 'translateY(0)';
+                }, index * 50);
             });
 
-            // Load draft when modal opens
-            document.getElementById('addPlayerModal').addEventListener('show.bs.modal', loadDraft);
-
-            // Clear draft when successfully submitted
-            const form = document.querySelector('#addPlayerModal form');
-            form.addEventListener('submit', function() {
-                localStorage.removeItem('player_draft');
+            // Highlight special players on load
+            const specialRows = document.querySelectorAll('[data-special="1"]');
+            specialRows.forEach(row => {
+                row.style.animation = 'pulse 2s infinite';
             });
         });
+
+        // Add search functionality
+        function searchPlayers(searchTerm) {
+            const rows = document.querySelectorAll('.player-row');
+            rows.forEach(row => {
+                const name = row.querySelector('strong').textContent.toLowerCase();
+                if (name.includes(searchTerm.toLowerCase()) || searchTerm === '') {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        }
+
+        // Add keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            // Ctrl/Cmd + N to add new player
+            if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+                e.preventDefault();
+                const modal = new bootstrap.Modal(document.getElementById('addPlayerModal'));
+                modal.show();
+            }
+            
+            // Ctrl/Cmd + F to focus search
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                e.preventDefault();
+                // Add search input if not exists
+                if (!document.getElementById('searchInput')) {
+                    const searchInput = document.createElement('input');
+                    searchInput.type = 'text';
+                    searchInput.id = 'searchInput';
+                    searchInput.className = 'form-control mb-3';
+                    searchInput.placeholder = 'Tìm kiếm cầu thủ...';
+                    searchInput.addEventListener('input', function() {
+                        searchPlayers(this.value);
+                    });
+                    
+                    const cardBody = document.querySelector('.card-custom .card-body');
+                    cardBody.insertBefore(searchInput, cardBody.firstChild);
+                }
+                document.getElementById('searchInput').focus();
+            }
+        });
+
+        // Add CSS animations
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes pulse {
+                0% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7); }
+                70% { box-shadow: 0 0 0 10px rgba(255, 152, 0, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0); }
+            }
+        `;
+        document.head.appendChild(style);
     </script>
 </body>
 </html>

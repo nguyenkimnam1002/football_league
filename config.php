@@ -1,5 +1,5 @@
 <?php
-// config.php - Cấu hình cơ sở dữ liệu và constants
+// config.php - Cấu hình cơ sở dữ liệu và constants (FIXED)
 
 class Database {
     private $host = 'localhost';
@@ -45,15 +45,22 @@ class DB {
 }
 
 // Constants
-define('LOCK_TIME', '23:59:59'); // Tạm thời đổi thành 23:59 để test
-define('MATCH_START_TIME', '00:00:01'); // Tạm thời đổi thành 00:00 để test
-define('MIN_PLAYERS', 4); // Giảm xuống 4 để test dễ hơn
-define('POINTS_WIN', 3);
-define('POINTS_LOSE', 0);
+define('LOCK_TIME', '23:59:59');
+define('MATCH_START_TIME', '00:00:01');
+define('MIN_PLAYERS', 4);
 
-// Test mode - Bỏ comment dòng dưới để enable test mode
+// ĐIỂM SỐ CHO CẦU THỦ THƯỜNG - SỬ DỤNG FLOAT ĐỂ TÍNH TOÁN CHÍNH XÁC
+define('POINTS_WIN', 3.0);
+define('POINTS_DRAW', 1.0);
+define('POINTS_LOSE', 0.0);
+
+// ĐIỂM SỐ CHO CẦU THỦ ĐẶC BIỆT - SỬ DỤNG FLOAT
+define('SPECIAL_POINTS_WIN', 4.5);   // 3.0 x 1.5 = 4.5
+define('SPECIAL_POINTS_DRAW', 1.5);  // 1.0 x 1.5 = 1.5
+define('SPECIAL_POINTS_LOSE', 0.0);  // 0.0 x 1.5 = 0.0
+
+// Test mode
 define('TEST_MODE', true);
-
 define('EDIT_MODE', true);
 
 // Timezone
@@ -73,26 +80,10 @@ function getCurrentDateTime() {
 }
 
 function isRegistrationLocked($date = null) {
-    // Luôn cho phép đăng ký - không bao giờ khóa
     return false;
-    
-    // Code cũ bị comment để tham khảo:
-    // if (defined('TEST_MODE') && TEST_MODE) {
-    //     return false;
-    // }
-    // 
-    // if ($date === null) {
-    //     $date = getCurrentDate();
-    // }
-    // 
-    // $currentTime = getCurrentTime();
-    // $lockTime = LOCK_TIME;
-    // 
-    // return $currentTime >= $lockTime;
 }
 
 function canUpdateMatchResult($matchDate) {
-    // Nếu đang ở test mode, luôn cho phép update
     if (defined('TEST_MODE') && TEST_MODE) {
         return true;
     }
@@ -100,7 +91,6 @@ function canUpdateMatchResult($matchDate) {
     $currentDate = getCurrentDate();
     $currentTime = getCurrentTime();
     
-    // Chỉ có thể cập nhật kết quả sau 7h sáng ngày hôm sau
     if ($currentDate > $matchDate) {
         return true;
     }
@@ -158,6 +148,23 @@ function successResponse($message, $data = null) {
 }
 
 /**
+ * Tính điểm số dựa trên loại cầu thủ và kết quả trận đấu - FIXED
+ * Trả về số thập phân chính xác
+ */
+function calculatePoints($isWin, $isDraw, $isSpecialPlayer) {
+    // Đảm bảo tính toán với float để tránh làm tròn
+    if ($isSpecialPlayer) {
+        if ($isWin) return (float) SPECIAL_POINTS_WIN;      // 4.5
+        if ($isDraw) return (float) SPECIAL_POINTS_DRAW;    // 1.5
+        return (float) SPECIAL_POINTS_LOSE;                 // 0.0
+    } else {
+        if ($isWin) return (float) POINTS_WIN;              // 3.0
+        if ($isDraw) return (float) POINTS_DRAW;            // 1.0
+        return (float) POINTS_LOSE;                         // 0.0
+    }
+}
+
+/**
  * Tính số trận thua
  */
 function calculateLosses($totalMatches, $wins, $draws) {
@@ -177,5 +184,49 @@ function formatWinDrawLoss($wins, $draws, $losses) {
 function calculateWinRate($wins, $totalMatches) {
     if ($totalMatches == 0) return 0;
     return round(($wins / $totalMatches) * 100, 1);
+}
+
+/**
+ * Format hiển thị cầu thủ đặc biệt
+ */
+function formatSpecialPlayer($isSpecial) {
+    return $isSpecial ? '⭐ Đặc biệt' : 'Thường';
+}
+
+/**
+ * Get special player badge class
+ */
+function getSpecialPlayerBadgeClass($isSpecial) {
+    return $isSpecial ? 'bg-warning text-dark' : 'bg-secondary';
+}
+
+/**
+ * Format điểm số hiển thị - THÊM MỚI
+ * Hiển thị số thập phân nếu cần, nguyên nếu không cần
+ */
+function formatPoints($points) {
+    $points = (float) $points;
+    
+    // Nếu là số nguyên, hiển thị không có thập phân
+    if ($points == intval($points)) {
+        return number_format($points, 0);
+    }
+    
+    // Nếu có thập phân, hiển thị 1 chữ số thập phân
+    return number_format($points, 1);
+}
+
+/**
+ * Validate điểm số - THÊM MỚI
+ * Đảm bảo điểm được tính chính xác
+ */
+function validatePoints($points, $isSpecialPlayer, $matchResult) {
+    $expectedPoints = calculatePoints(
+        $matchResult['isWin'], 
+        $matchResult['isDraw'], 
+        $isSpecialPlayer
+    );
+    
+    return abs($points - $expectedPoints) < 0.01; // Cho phép sai số nhỏ
 }
 ?>

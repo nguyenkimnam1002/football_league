@@ -134,3 +134,38 @@ ALTER TABLE players ADD COLUMN total_draws INT DEFAULT 0 AFTER total_wins;
 -- Giả sử total_losses = total_matches - total_wins - total_draws
 -- Tạm thời set total_draws = 0 cho dữ liệu hiện tại
 UPDATE players SET total_draws = 0 WHERE total_draws IS NULL;
+
+-- Thêm trường is_special_player vào bảng players
+ALTER TABLE players 
+ADD COLUMN is_special_player TINYINT(1) DEFAULT 0 AFTER secondary_skill;
+
+-- Thêm comment để rõ ràng
+ALTER TABLE players 
+MODIFY COLUMN is_special_player TINYINT(1) DEFAULT 0 COMMENT '1 = Cầu thủ đặc biệt (x1.5 điểm), 0 = Cầu thủ thường';
+
+-- Cập nhật một số cầu thủ mẫu thành cầu thủ đặc biệt (tùy chọn)
+-- UPDATE players SET is_special_player = 1 WHERE name IN ('Đỗ Văn Tính (C)', 'Nguyễn Quang Tuấn', 'Trần Văn Tuấn');
+
+-- Kiểm tra kết quả
+-- SELECT id, name, main_position, main_skill, is_special_player 
+-- FROM players 
+-- WHERE is_special_player = 1;
+
+-- Fix database để hỗ trợ điểm thập phân cho cầu thủ đặc biệt
+
+-- Thay đổi kiểu dữ liệu trong bảng players
+ALTER TABLE players 
+MODIFY COLUMN total_points DECIMAL(8,2) DEFAULT 0.00;
+
+-- Thay đổi kiểu dữ liệu trong bảng match_participants  
+ALTER TABLE match_participants 
+MODIFY COLUMN points_earned DECIMAL(5,2) DEFAULT 0.00;
+
+-- Thay đổi kiểu dữ liệu trong bảng player_stats
+ALTER TABLE player_stats 
+MODIFY COLUMN points DECIMAL(8,2) DEFAULT 0.00;
+
+-- Kiểm tra lại cấu trúc bảng
+DESCRIBE players;
+DESCRIBE match_participants;
+DESCRIBE player_stats;

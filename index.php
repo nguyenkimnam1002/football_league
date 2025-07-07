@@ -21,13 +21,24 @@ $currentYear = date('Y');
 // Basic stats
 $stmt = $pdo->query("
     SELECT 
-        COUNT(*) as total_players,
-        SUM(total_goals) as total_goals,
-        SUM(total_assists) as total_assists,
+        COUNT(mp.player_id) as total_players,
+        SUM(mp.goals) as total_goals,
+        SUM(mp.assists) as total_assists,
         COUNT(CASE WHEN total_matches > 0 THEN 1 END) as active_players
-    FROM players
+    FROM players p
+        LEFT JOIN match_participants mp ON p.id = mp.player_id 
+        LEFT JOIN daily_matches dm ON mp.match_id = dm.id 
+    Where dm.status = 'completed'
 ");
 $basicStats = $stmt->fetch();
+
+// Matches this year
+$stmt = $pdo->prepare("
+    SELECT COUNT(*) as total_players
+    FROM players p
+");
+$stmt->execute();
+$playerOfTeam = $stmt->fetchColumn();
 
 // Matches this year
 $stmt = $pdo->prepare("
@@ -71,7 +82,7 @@ $stmt->execute([$currentYear]);
 $avgGoalsPerMatch = $stmt->fetchColumn();
 
 $clubStats = [
-    'total_players' => $basicStats['total_players'],
+    'total_players' => $playerOfTeam,
     'matches_this_year' => $yearMatches,
     'total_goals' => $basicStats['total_goals'],
     'total_assists' => $basicStats['total_assists'],
@@ -96,9 +107,18 @@ $recentMatches = $stmt->fetchAll();
 
 // Get top players
 $stmt = $pdo->query("
-    SELECT name, total_points, total_goals, total_matches, main_position
-    FROM players 
-    WHERE total_matches > 0
+    SELECT p.name,
+        SUM(mp.points_earned) total_points, 
+        SUM(mp.goals) total_goals, 
+        COUNT(mp.id) total_matches, 
+        p.main_position
+    FROM players p
+        LEFT JOIN match_participants mp ON p.id = mp.player_id 
+        LEFT JOIN daily_matches dm ON mp.match_id = dm.id 
+    WHERE 1=1 
+        AND dm.status = 'completed'
+        AND p.total_matches > 0
+    GROUP BY p.name, p.main_position
     ORDER BY total_points DESC, total_goals DESC
     LIMIT 6
 ");
